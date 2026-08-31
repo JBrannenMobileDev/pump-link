@@ -1,0 +1,57 @@
+@startuml
+!include style.puml
+
+title Cold start to Ready
+
+box "Phone" $boxPhone
+  participant "Link Manager" as LM $phoneFill
+  participant "Session L4" as SES $phoneFill
+  participant "Reconciler" as RC $storeFill
+end box
+
+box "Pump" $boxPump
+  participant "GATT Server" as GS $pumpFill
+  participant "Pump Core" as FW $pumpFill
+end box
+
+autonumber
+
+note over LM : state = Scanning
+GS ->> LM : advertisement + scan response
+note right of LM
+  matched on logical device id from
+  manufacturer data, not on MAC or
+  CBPeripheral handle
+end note
+
+LM -> GS : connect
+GS --> LM : connected
+LM -> GS : bond, or confirm existing bond
+GS --> LM : bonded
+LM -> GS : discover services
+GS --> LM : PumpLink service, 3 characteristics
+LM -> GS : negotiate MTU
+GS --> LM : ATT_MTU = 185
+LM -> GS : enable notifications on RSP
+GS --> LM : CCCD confirmed
+
+note over LM : Subscribed.\nTransport usable, no session yet.
+
+SES -> GS ++ : AUTH_CHALLENGE_REQ, controllerId, nonceC
+GS --> SES -- : AUTH_CHALLENGE_RSP, pumpId, nonceP
+note over SES, FW
+  both derive K_s = HKDF over K_p,
+  salted with nonceC and nonceP
+end note
+SES -> GS ++ : AUTH_VERIFY_REQ, mac
+GS -> FW ++ : verify controller
+FW --> GS -- : verified
+GS --> SES -- : AUTH_VERIFY_RSP, mac
+
+note over LM : Authenticating to Reconciling
+
+RC -> RC : read journal, no in-flight entries
+RC -> LM : ReconcileDone, unresolved = 0
+note over LM $noteGood : **Ready.** Dosing enabled.
+
+@enduml

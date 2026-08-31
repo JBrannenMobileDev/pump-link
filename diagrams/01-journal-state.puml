@@ -1,0 +1,45 @@
+@startuml
+!include style.puml
+
+title Command journal lifecycle
+
+state Pending <<pending>>
+state InFlight <<pending>>
+state Unreachable <<blocked>>
+state Indeterminate <<blocked>>
+state ConfirmedCompleted <<ready>>
+state ConfirmedAborted <<ready>>
+state ConfirmedNotDelivered <<ready>>
+
+[*] --> Pending : CommandId allocated
+
+Pending  --> InFlight : PDU handed to transport
+InFlight --> InFlight : NEVER_SEEN and\nreissue guard met
+
+InFlight --> ConfirmedCompleted    : record COMPLETED
+InFlight --> ConfirmedAborted      : record ABORTED
+InFlight --> ConfirmedNotDelivered : NEVER_SEEN,\nreissue declined
+InFlight --> Unreachable   : T_RESOLVE expired
+InFlight --> Indeterminate : outcome EVICTED
+
+Unreachable   --> InFlight : next session established
+Indeterminate --> ConfirmedCompleted    : user verifies at pump
+Indeterminate --> ConfirmedNotDelivered : user verifies at pump
+
+ConfirmedCompleted    --> [*]
+ConfirmedAborted      --> [*]
+ConfirmedNotDelivered --> [*]
+
+note right of Unreachable
+  The question has not been asked yet.
+  It will be asked again automatically.
+end note
+
+note right of Indeterminate
+  The question was asked and the pump
+  could no longer answer it. Retrying
+  will never change that, so resolution
+  needs a human at the pump.
+end note
+
+@enduml

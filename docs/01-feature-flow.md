@@ -2,77 +2,20 @@
 
 The feature, decomposed to every decision node and every abort path.
 
-The flow is partitioned by **phase** rather than by actor. Actor partitions are
-the conventional UML choice, but here the interesting structure is temporal: the
-commit point in Phase 2 divides the flow into "nothing has happened yet" and
-"something may have happened," and every hazard lives on one side of that line.
-Ownership per node is given in the [decision table](#decision-table) instead.
+The diagram is partitioned into **User**, **App**, and **Pump** swimlanes, so
+that "who is responsible for this step" is answered by position rather than by
+annotation. The structure that swimlanes cannot show is temporal: the commit
+point divides the flow into "nothing has happened yet" and "something may have
+happened," and every hazard in [04 — Hazard Analysis](04-hazard-analysis.md)
+lives on one side of that line. It is marked on the diagram and argued in
+[The commit point](#the-commit-point) below.
 
 ## Activity diagram
 
-```mermaid
-flowchart TD
-    Start(["User opens bolus entry"])
-    Start --> G0{"Session READY?"}
-    G0 -- No --> B0["Dosing disabled;<br/>surface link state"]
-    B0 --> Stop1(["Abort"])
-    G0 -- Yes --> E1["User enters dose"]
-
-    subgraph request ["Phase 1 — Request. Nothing is committed."]
-        E1 --> G1{"Within range<br/>and increment?"}
-        G1 -- No --> B1["Inline validation error"]
-        B1 --> E1
-        G1 -- Yes --> G2{"Within app-side<br/>maximum?"}
-        G2 -- No --> B2["Block; explain the limit"]
-        B2 --> E1
-        G2 -- Yes --> C1["Confirmation screen:<br/>dose, units, pump status"]
-        C1 --> G3{"User confirms?"}
-        G3 -- No --> Stop2(["Abort. Nothing journaled."])
-    end
-
-    subgraph transmit ["Phase 2 — Commit, then transmit."]
-        G3 -- Yes --> J1["Allocate CommandId from<br/>persisted monotonic counter"]
-        J1 --> J2[("Journal PENDING<br/>and flush to disk")]
-        J2 --> J3[("Journal IN_FLIGHT")]
-        J3 --> T1["Send BOLUS_REQ"]
-    end
-
-    subgraph await ["Phase 3 — Await outcome."]
-        T1 --> G4{"BOLUS_RSP within T_RESP,<br/>after 2 retries?"}
-        G4 -- "No response" --> AMB(["Outcome ambiguous"])
-        G4 -- "Link dropped" --> AMB
-        G4 -- Yes --> G5{"Record state?"}
-        G5 -- ABORTED --> R2["Journal CONFIRMED_ABORTED"]
-        G5 -- "ACCEPTED or IN_PROGRESS" --> M1["Monitor BOLUS_PROGRESS_IND"]
-        M1 --> G6{"COMPLETED received<br/>before link loss?"}
-        G6 -- No --> AMB
-        G6 -- Yes --> R1["Journal CONFIRMED_COMPLETED"]
-    end
-
-    subgraph reconcile ["Phase 4 — Reconcile. Query, then decide."]
-        AMB --> RC1["Reconnect and authenticate"]
-        RC1 --> G7{"Session re-established<br/>within T_RESOLVE?"}
-        G7 -- No --> UNR["Journal UNREACHABLE;<br/>dosing blocked, retry next session"]
-        G7 -- Yes --> RC2["QUERY_COMMAND_OUTCOME"]
-        RC2 --> G8{"Outcome?"}
-        G8 -- EVICTED --> IND["Journal INDETERMINATE;<br/>dosing blocked"]
-        G8 -- COMPLETED --> R1
-        G8 -- ABORTED --> R2
-        G8 -- "ACCEPTED or IN_PROGRESS" --> M1
-        G8 -- NEVER_SEEN --> G9{"Reissue guard met?"}
-        G9 -- Yes --> T1
-        G9 -- No --> RQ["Re-confirm with user;<br/>show elapsed time"]
-        RQ --> G10{"User re-confirms?"}
-        G10 -- Yes --> T1
-        G10 -- No --> R3["Journal CONFIRMED_NOT_DELIVERED"]
-    end
-
-    R1 --> D1(["Delivered"])
-    R2 --> D2(["Partially delivered"])
-    R3 --> D3(["Not delivered"])
-    UNR --> D4(["Blocked, awaiting reconciliation"])
-    IND --> D5(["Indeterminate. Verify at the pump."])
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="img/01-bolus-activity-dark.svg">
+  <img alt="Activity diagram: deliver a bolus, partitioned by actor" src="img/01-bolus-activity-light.svg">
+</picture>
 
 ## The commit point
 
@@ -169,23 +112,10 @@ recommends for the general case, for weaker reasons than apply here.
 The app-side mirror of the pump's delivery record. Persisted, survives process
 death, and is the input to reconciliation on every subsequent session.
 
-```mermaid
-stateDiagram-v2
-    [*] --> Pending: CommandId allocated
-    Pending --> InFlight: PDU handed to transport
-    InFlight --> InFlight: NEVER_SEEN and reissue guard met
-    InFlight --> ConfirmedCompleted: record COMPLETED
-    InFlight --> ConfirmedAborted: record ABORTED
-    InFlight --> ConfirmedNotDelivered: NEVER_SEEN, reissue declined
-    InFlight --> Unreachable: T_RESOLVE expired
-    InFlight --> Indeterminate: outcome EVICTED
-    Unreachable --> InFlight: next session established
-    Indeterminate --> ConfirmedCompleted: user verifies at pump
-    Indeterminate --> ConfirmedNotDelivered: user verifies at pump
-    ConfirmedCompleted --> [*]
-    ConfirmedAborted --> [*]
-    ConfirmedNotDelivered --> [*]
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="img/01-journal-state-dark.svg">
+  <img alt="State diagram: command journal lifecycle" src="img/01-journal-state-light.svg">
+</picture>
 
 `Unreachable` and `Indeterminate` differ in a way worth keeping distinct.
 `Unreachable` means the question has not been asked yet and will be asked again

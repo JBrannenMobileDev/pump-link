@@ -6,25 +6,10 @@ decision, its consequences including the bad ones, and what would change it.
 
 ## Module structure
 
-```mermaid
-flowchart TB
-    subgraph androidLayer ["Android"]
-        app[":app<br/>Compose, ViewModel, UiState, Intent, reducer"]
-        data[":data<br/>BLE central, GATT server, journal persistence,<br/>foreground service, platform error mapping"]
-    end
-    subgraph pureLayer ["Pure Kotlin, JVM-testable"]
-        domain[":domain<br/>Entities, use cases,<br/>repository and journal interfaces"]
-        protocol[":protocol<br/>Framing, CRC, codec, session,<br/>connection state machine"]
-        simulator[":simulator<br/>PumpCore: record store, dedupe,<br/>limits, fault injection"]
-    end
-
-    app --> domain
-    app -->|assembly only| data
-    data --> domain
-    data --> protocol
-    data --> simulator
-    simulator --> protocol
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="img/07-modules-dark.svg">
+  <img alt="Component diagram: module structure and dependency direction" src="img/07-modules-light.svg">
+</picture>
 
 Arrows are compile-time dependencies. `:domain` depends on nothing, which is the
 property that matters — everything else is arranged to preserve it.

@@ -17,43 +17,28 @@ radio and no device attached.
 
 ## Diagram
 
-```mermaid
-stateDiagram-v2
-    [*] --> Idle
+The machine is drawn at two levels. At the top level, the six states that get a
+link up are collapsed into the composite state `Active.Linking`, and a single
+transition off the `Active` boundary carries the disconnection and timeout cases
+that apply to every substate. Drawing those as eleven separate edges is
+technically equivalent and considerably harder to read.
 
-    Idle --> Scanning: StartRequested
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="img/03-connection-state-dark.svg">
+  <img alt="Connection state machine, top level" src="img/03-connection-state-light.svg">
+</picture>
 
-    state Linking {
-        Scanning --> Connecting: ScanMatch / logical device id
-        Connecting --> Bonding: Connected
-        Bonding --> Discovering: Bonded
-        Discovering --> Configuring: ServicesDiscovered
-        Configuring --> Subscribed: MtuSettled and CccdConfirmed
-    }
+`Linking` refined:
 
-    state Session {
-        Authenticating --> Reconciling: AuthSucceeded
-        Reconciling --> Ready: ReconcileDone [nothing unresolved]
-        Reconciling --> Suspended: ReconcileDone [unresolved remain]
-        Suspended --> Reconciling: UserVerifiedAtPump
-    }
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="img/03-linking-substates-dark.svg">
+  <img alt="Linking composite state, refined into its substates" src="img/03-linking-substates-light.svg">
+</picture>
 
-    Subscribed --> Authenticating: begin session
-    Scanning --> Idle: ScanTimeout
-    Discovering --> Recovering: ServiceChanged
-
-    Linking --> Recovering: Disconnected / Timeout / GattFailure
-    Session --> Recovering: Disconnected / Timeout
-    Authenticating --> Unpaired: AuthFailed [bond or key invalid]
-
-    Recovering --> Scanning: backoff elapsed [attempts < max]
-    Recovering --> Failed: attempts exhausted
-
-    Failed --> Scanning: StartRequested
-    Ready --> Idle: StopRequested
-    Suspended --> Idle: StopRequested
-    Unpaired --> [*]
-```
+The implementation is one flat `when (state, event)` reducer over the leaf
+states listed below. The composite is a presentation device for the diagram, not
+a nested state machine in the code — hierarchical states would buy nothing here
+except a second dispatch mechanism to get wrong.
 
 ## `Reconciling` is the point of the diagram
 

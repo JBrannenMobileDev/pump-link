@@ -13,15 +13,10 @@ GATT is an attribute store, not a transport. Treating it as one is how BLE
 stacks acquire their worst bugs, so the layers are separated explicitly and each
 one is independently testable.
 
-```mermaid
-flowchart TD
-    L4["L4 — Session<br/>mutual authentication, key derivation, replay window"]
-    L3["L3 — Operations<br/>opcodes, request/response correlation, ACK/NAK, retry"]
-    L2["L2 — Message PDU<br/>header, sequence, integrity check, message authentication code"]
-    L1["L1 — Fragmentation<br/>split and reassemble against the negotiated ATT_MTU"]
-    L0["L0 — GATT<br/>write-with-response on CMD, notification on RSP"]
-    L4 --> L3 --> L2 --> L1 --> L0
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="img/02-layers-dark.svg">
+  <img alt="Protocol layering, L0 through L4" src="img/02-layers-light.svg">
+</picture>
 
 Only L1 knows the MTU. Only L4 knows the keys. L2 and L3 are pure byte
 transformations and are the bulk of the JVM test suite.
@@ -103,16 +98,24 @@ buffer exceeding the maximum message size of 512 octets.
 
 After reassembly:
 
-```mermaid
-packet-beta
-0-7: "Ver | Flags"
-8-15: "Opcode"
-16-23: "Seq"
-24-31: "AckSeq"
-32-63: "CommandId (4 octets)"
-64-71: "Payload (0..n octets)"
-72-135: "MAC (8 octets, present iff AUTH)"
-136-151: "CRC-16 (2 octets)"
+```text
+ 0                   1                   2                   3
+ 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|  Ver  | Flags |    Opcode     |      Seq      |    AckSeq     |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|                           CommandId                           |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|                                                               |
+/                     Payload (0..n octets)                     /
+|                                                               |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|                                                               |
++               MAC (8 octets, present iff AUTH)                +
+|                                                               |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|            CRC-16             |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 ```
 
 Normative field table:

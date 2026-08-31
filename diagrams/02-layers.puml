@@ -1,0 +1,30 @@
+@startuml
+!include style.puml
+
+title Protocol layering
+
+rectangle "**L4 — Session**\nmutual authentication, key derivation, replay window" as L4 $phoneFill
+rectangle "**L3 — Operations**\nopcodes, request/response correlation, ACK/NAK, retry" as L3 $phoneFill
+rectangle "**L2 — Message PDU**\nheader, sequence, CRC-16, message authentication code" as L2 $phoneFill
+rectangle "**L1 — Fragmentation**\nsplit and reassemble against the negotiated ATT_MTU" as L1 $storeFill
+rectangle "**L0 — GATT**\nwrite-with-response on CMD, notification on RSP" as L0 $pumpFill
+
+L4 --> L3
+L3 --> L2
+L2 --> L1
+L1 --> L0
+
+note right of L1
+  Only L1 knows the MTU.
+end note
+
+note right of L4
+  Only L4 knows the keys.
+end note
+
+note right of L2
+  L2 and L3 are pure byte transformations
+  and are the bulk of the JVM test suite.
+end note
+
+@enduml

@@ -1,0 +1,121 @@
+@startuml
+!include style.puml
+
+title Deliver a bolus
+
+|$laneUser|User|
+|$laneApp|App|
+|$lanePump|Pump|
+
+|User|
+start
+:Open bolus entry;
+
+|App|
+if (Session READY?) then (no)
+  :Disable dosing,\nsurface link state;
+  stop
+endif
+
+(B)
+|User|
+:Enter dose;
+
+|App|
+if (Within range and increment,\nand under the app-side maximum?) then (no)
+  :Inline validation error;
+  (B)
+  detach
+endif
+
+:Show confirmation screen\nwith dose and pump status;
+
+|User|
+if (Confirm?) then (no)
+  |App|
+  :Abort. Nothing journaled.;
+  stop
+endif
+
+|App|
+:Allocate CommandId from a\npersisted monotonic counter;
+
+(A)
+:Journal PENDING, flush to disk; <<commit>>
+note right
+  **Commit point.**
+  Everything above is reversible.
+  Nothing below is.
+end note
+:Journal IN_FLIGHT;
+:Send BOLUS_REQ carrying\nthis CommandId;
+
+|Pump|
+if (CommandId already in\nthe delivery record?) then (yes)
+  :Return the existing record.\n//No actuation.//;
+else (no)
+  :Validate against pump\nsafety limits;
+  :Commit the record,\n//then// actuate;
+endif
+
+|App|
+if (BOLUS_RSP within T_RESP,\nafter 2 identical retries?) then (yes)
+  if (COMPLETED before link loss?) then (yes)
+    :Journal CONFIRMED_COMPLETED;
+    :Delivered; <<ok>>
+    stop
+  endif
+endif
+
+:Outcome ambiguous; <<ambig>>
+note right
+  Not a failure. An //unknown//.
+  Reporting failure here is hazard H-02.
+end note
+:Reconnect and authenticate;
+
+if (Session re-established\nwithin T_RESOLVE?) then (no)
+  :Journal UNREACHABLE;
+  :Blocked, awaiting\nreconciliation; <<block>>
+  stop
+endif
+
+:QUERY_COMMAND_OUTCOME;
+
+switch (Outcome?)
+case (COMPLETED)
+  :Journal CONFIRMED_COMPLETED;
+  :Delivered; <<ok>>
+  stop
+case (ABORTED)
+  :Journal CONFIRMED_ABORTED;
+  :Partially delivered; <<ok>>
+  stop
+case (ACCEPTED or IN_PROGRESS)
+  :Resume monitoring progress;
+  :Journal CONFIRMED_COMPLETED;
+  :Delivered; <<ok>>
+  stop
+case (EVICTED)
+  :Journal INDETERMINATE;
+  :Indeterminate.\nVerify at the pump.; <<block>>
+  stop
+case (NEVER_SEEN)
+  :Evaluate the reissue guard:\nunder 60 s, screen foregrounded,\nno intervening action, first reissue;
+  if (Guard met?) then (no)
+    |User|
+    if (Re-confirm, with\nelapsed time shown?) then (no)
+      |App|
+      :Journal CONFIRMED_NOT_DELIVERED;
+      :Not delivered; <<ok>>
+      stop
+    endif
+    |App|
+  endif
+endswitch
+
+:Reissue the **same** CommandId.\nA new one would be a new dose.;
+(A)
+detach
+
+@enduml

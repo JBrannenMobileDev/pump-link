@@ -1,0 +1,54 @@
+@startuml
+!include style.puml
+
+title Duplicate suppression
+
+box "Phone" $boxPhone
+  participant "Transport L1-L3" as TX $phoneFill
+end box
+
+box "Pump" $boxPump
+  participant "GATT Server" as GS $pumpFill
+  participant "Pump Core" as FW $pumpFill
+end box
+
+autonumber
+
+TX -> GS ++ : BOLUS_REQ cmd = 0x1A7F, seq = 12
+GS -> FW ++ : dispatch
+FW -> FW : no record, commit ACCEPTED, actuate
+FW --> GS -- : record
+GS ->x TX : BOLUS_RSP lost
+deactivate GS
+
+note over TX : T_RESP expires
+
+TX -> GS ++ : retransmit byte-identical PDU\ncmd = 0x1A7F, seq = 12, same MAC
+note right of GS
+  seq equals lastAccepted and content is
+  identical, so **L2** replays the cached
+  response and never dispatches to L3
+end note
+GS --> TX -- : BOLUS_RSP from cache
+
+== later: reconnect, new session, seq counter reset ==
+
+TX -> GS ++ : BOLUS_REQ cmd = 0x1A7F, seq = 0
+note right of GS
+  new session, so the sequence window
+  offers no protection here
+end note
+GS -> FW ++ : dispatch
+FW -> FW : record for 0x1A7F already exists
+FW --> GS -- : existing record, //no actuation//
+GS --> TX -- : BOLUS_RSP COMPLETED 4500 mU
+
+note over TX, FW $noteGood
+  Two independent suppression mechanisms.
+  Sequence numbers cover retransmission within a session.
+  The delivery record covers reissue across sessions,
+  where the sequence counter has been reset and offers nothing.
+  A design with only the first double-doses on every reconnect.
+end note
+
+@enduml

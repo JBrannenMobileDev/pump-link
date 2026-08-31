@@ -1,0 +1,32 @@
+name: docs
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      # PlantUML delegates state and component layout to Graphviz.
+      - name: Install Graphviz
+        run: sudo apt-get update && sudo apt-get install -y graphviz
+
+      - name: Internal links, anchors, and diagram assets
+        run: node tools/check-links.mjs
+
+      # Renders every .puml and diffs against what is committed, so a diagram
+      # source can never drift from the SVG the documentation actually shows.
+      - name: Committed diagrams match their sources
+        run: tools/render-diagrams.sh --check

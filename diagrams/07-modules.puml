@@ -1,0 +1,30 @@
+@startuml
+!include style.puml
+
+title Module structure and dependency direction
+
+package "Android" as androidLayer {
+  component ":app\n\nCompose, ViewModel,\nUiState, Intent, reducer" as app $phoneFill
+  component ":data\n\nBLE central, GATT server,\njournal persistence, foreground\nservice, platform error mapping" as data $phoneFill
+}
+
+package "Pure Kotlin, JVM-testable" as pureLayer {
+  component ":domain\n\nEntities, use cases,\nrepository and journal\ninterfaces" as domain $storeFill
+  component ":protocol\n\nFraming, CRC, codec,\nsession, connection\nstate machine" as protocol $pumpFill
+  component ":simulator\n\nPumpCore: record store,\ndedupe, limits,\nfault injection" as simulator $pumpFill
+}
+
+app       --> domain
+app       ..> data      : assembly only
+data      --> domain
+data      --> protocol
+data      --> simulator
+simulator --> protocol
+
+note bottom of domain
+  :domain depends on nothing.
+  Everything else is arranged
+  to preserve that.
+end note
+
+@enduml

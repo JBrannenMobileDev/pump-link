@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Verifies every relative Markdown link in /docs and the root README resolves
-// to a real file, and that every "#anchor" matches a real heading.
+// to a real file, that every "#anchor" matches a real heading, and that every
+// diagram referenced from a <picture> element exists in both themes.
 //
 // Slug generation mirrors github-slugger: lower-case, strip punctuation, then
 // replace each space individually. Em dashes in headings therefore leave two
@@ -15,6 +16,7 @@ import { join, dirname, relative, resolve } from "node:path";
 const repoRoot = new URL("..", import.meta.url).pathname;
 const LINK = /\]\((?!https?:|mailto:)([^)\s#]*)(#[^)\s]*)?\)/g;
 const HEADING = /^#{1,6}\s+(.+?)\s*$/gm;
+const ASSET = /(?:src|srcset)="(?!https?:)([^"]+)"/g;
 
 function slug(heading) {
   return (
@@ -72,6 +74,15 @@ for (const file of sources.sort()) {
     }
     if (anchor && !(await anchorsOf(resolved)).has(anchor)) {
       broken.push(`${where}  missing anchor: ${target}${anchor}`);
+    }
+  }
+
+  for (const match of body.matchAll(ASSET)) {
+    checked += 1;
+    const [, target] = match;
+    const line = body.slice(0, match.index).split("\n").length;
+    if (!existsSync(resolve(dirname(file), target))) {
+      broken.push(`${relative(repoRoot, file)}:${line}  missing asset: ${target}`);
     }
   }
 }

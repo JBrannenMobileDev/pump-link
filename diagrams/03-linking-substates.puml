@@ -1,0 +1,34 @@
+@startuml
+!include style.puml
+
+title Linking, refined
+
+state Linking {
+  [*]         --> Scanning
+  Scanning    --> Connecting  : ScanMatch /\nlogical device id
+  Connecting  --> Bonding     : Connected
+  Bonding     --> Discovering : Bonded
+  Discovering --> Configuring : ServicesDiscovered
+  Configuring --> Subscribed  : MtuSettled and\nCccdConfirmed
+  Discovering --> Scanning    : ServiceChanged /\nrediscover
+  Subscribed  --> [*]
+}
+
+Linking --> Authenticating : begin session
+
+note right of Linking
+  Every substate has a timeout.
+  Expiry leaves Linking for Recovering,
+  which is elided here; see the top-level
+  diagram.
+end note
+
+note bottom of Linking
+  Subscribed means the transport is usable
+  and notifications are confirmed enabled.
+  No L3 traffic is permitted before it,
+  which is what makes hazard H-11
+  unreachable rather than merely avoided.
+end note
+
+@enduml

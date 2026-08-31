@@ -1,0 +1,77 @@
+@startuml
+!include style.puml
+
+title Ambiguous outcome and recovery
+
+box "Phone" $boxPhone
+  participant "Bolus Screen" as UI $phoneFill
+  participant "DeliverBolusUseCase" as UC $phoneFill
+  participant "Command Journal" as JN $storeFill
+  participant "Transport L1-L3" as TX $phoneFill
+end box
+
+box "Pump" $boxPump
+  participant "GATT Server" as GS $pumpFill
+  participant "Pump Core" as FW $pumpFill
+end box
+
+autonumber
+
+UI -> UC ++ : ConfirmBolus 4.5 U
+UC -> JN : write PENDING, flush, then IN_FLIGHT\ncmd = 0x1A7F
+UC -> TX ++ : BOLUS_REQ cmd = 0x1A7F
+TX -> GS ++ : write CMD
+GS -> FW ++ : dispatch
+FW -> FW : commit record ACCEPTED
+FW -> FW : begin actuation
+
+FW ->x TX : BOLUS_RSP lost, link dropped
+deactivate FW
+deactivate GS
+TX --> UC -- : Disconnected, TransientLink
+
+note over UI, FW $noteBad
+  The app cannot distinguish "never arrived" from
+  "delivering now". Both look identical from here.
+end note
+
+group $noteWarn Retry budget exhausted. This is NOT a failure.
+  UC -> JN : entry stays IN_FLIGHT
+  UC --> UI : state = Resolving, dosing blocked
+end
+
+== reconnect, re-authenticate, fresh session key ==
+
+critical resolve every in-flight entry before Ready
+  UC -> TX ++ : QUERY_COMMAND_OUTCOME cmd = 0x1A7F
+  TX -> GS ++ : write CMD
+  GS -> FW ++ : look up delivery record
+  FW --> GS -- : IN_PROGRESS, 1200 of 4500 mU\noldestRetained = 0x1900
+  GS --> TX -- : QUERY_COMMAND_OUTCOME_RSP
+  TX --> UC -- : IN_PROGRESS, 1200 mU
+  UC --> UI : state = Delivering, 1.2 of 4.5 U
+  note right of UC : resume monitoring.\nNo command reissued.
+
+else outcome = NEVER_SEEN
+  note right of UC
+    cmd is newer than oldestRetained,
+    so absence proves zero actuation
+  end note
+  UC -> TX : reissue BOLUS_REQ, same cmd = 0x1A7F
+
+else outcome = EVICTED
+  note right of UC
+    cmd is older than oldestRetained.
+    Absence proves nothing.
+  end note
+  UC -> JN : mark INDETERMINATE
+  UC --> UI : state = Indeterminate, verify at pump
+
+else T_RESOLVE expires
+  UC -> JN : mark UNREACHABLE
+  UC --> UI : state = Blocked, retry next session
+end
+
+deactivate UC
+
+@enduml

@@ -1,0 +1,124 @@
+' Shared dark-mode style. Tuned against GitHub's dark theme background (#0d1117).
+' Variable names match style-light.puml so diagram sources are style-agnostic.
+
+skinparam backgroundColor        #0D1117
+skinparam defaultFontName        "Helvetica Neue"
+skinparam defaultFontSize        13
+skinparam defaultMonospacedFontName "Menlo"
+skinparam defaultFontColor       #C9D1D9
+skinparam shadowing              false
+skinparam roundCorner            6
+skinparam ArrowColor             #8B98A8
+skinparam ArrowFontColor         #C9D1D9
+skinparam ArrowFontSize          12
+skinparam NoteBackgroundColor    #2A2416
+skinparam NoteBorderColor        #6B5E32
+skinparam NoteFontColor          #E3D9B8
+skinparam NoteFontSize           12
+skinparam TitleFontSize          15
+skinparam TitleFontColor         #E6EDF3
+
+!$phoneFill    = "#17314F"
+!$phoneLine    = "#4478B0"
+!$pumpFill     = "#4A1F1F"
+!$pumpLine     = "#A85A5A"
+!$storeFill    = "#2E2848"
+!$storeLine    = "#6F62A8"
+!$boxPhone     = "#111E2E"
+!$boxPump      = "#2A1616"
+!$accent       = "#E0A458"
+!$muted        = "#8B949E"
+
+' Sequence-diagram highlight colours
+!$noteWarn   = "#3A3016"
+!$noteBad    = "#3E1F1F"
+!$noteGood   = "#1F3A22"
+
+' Activity-diagram swimlanes
+!$laneUser     = "#1B1A15"
+!$laneApp      = "#101823"
+!$lanePump     = "#1F1414"
+
+' Activity node classes. Names match style-light.puml so diagram sources are
+' theme-agnostic: ":Delivered; <<ok>>" rather than a literal colour.
+<style>
+activity {
+  .commit { BackGroundColor #4A3A1C; LineColor #A07C33; FontColor #F0E2C4; }
+  .ambig  { BackGroundColor #4A2222; LineColor #A85E5E; FontColor #F2D4D4; }
+  .block  { BackGroundColor #3A2547; LineColor #8A62A6; FontColor #E8D6F2; }
+  .ok     { BackGroundColor #1F3A22; LineColor #5C9E66; FontColor #D4EBD8; }
+}
+state {
+  .ready   { BackGroundColor #1F3A22; LineColor #5C9E66; FontColor #D4EBD8; }
+  .blocked { BackGroundColor #3A2547; LineColor #8A62A6; FontColor #E8D6F2; }
+  .fault   { BackGroundColor #4A2222; LineColor #A85E5E; FontColor #F2D4D4; }
+  .pending { BackGroundColor #4A3A1C; LineColor #A07C33; FontColor #F0E2C4; }
+}
+</style>
+
+skinparam sequence {
+  ParticipantBorderColor      #4A5A70
+  ParticipantBackgroundColor  #1C2530
+  ParticipantFontColor        #E6EDF3
+  ParticipantFontSize         13
+  ActorBorderColor            #4A5A70
+  ActorBackgroundColor        #1C2530
+  LifeLineBorderColor         #46525F
+  LifeLineBackgroundColor     #161B22
+  BoxBorderColor              #39414C
+  BoxFontColor                #AEB9C6
+  BoxFontSize                 13
+  GroupBorderColor            #5A6673
+  GroupBackgroundColor        #161B22
+  GroupHeaderFontColor        #E6EDF3
+  GroupFontColor              #E6EDF3
+  DividerBackgroundColor      #1C2530
+  DividerBorderColor          #39414C
+  ReferenceBackgroundColor    #161B22
+}
+
+skinparam state {
+  BackgroundColor    #1C2530
+  BorderColor        #4A5A70
+  FontColor          #E6EDF3
+  AttributeFontColor #AEB9C6
+  AttributeFontSize  11
+  StartColor         #8B98A8
+  EndColor           #8B98A8
+}
+
+skinparam activity {
+  BackgroundColor          #1C2530
+  BorderColor              #4A5A70
+  FontColor                #E6EDF3
+  DiamondBackgroundColor   #2A2416
+  DiamondBorderColor       #6B5E32
+  DiamondFontColor         #E3D9B8
+  StartColor               #8B98A8
+  EndColor                 #8B98A8
+  BarColor                 #4A5A70
+}
+
+skinparam swimlane {
+  BorderColor      #39414C
+  TitleFontColor   #E6EDF3
+  TitleFontSize    13
+}
+
+skinparam component {
+  BackgroundColor  #1C2530
+  BorderColor      #4A5A70
+  FontColor        #E6EDF3
+}
+
+skinparam rectangle {
+  BackgroundColor  #12171E
+  BorderColor      #39414C
+  FontColor        #AEB9C6
+}
+
+skinparam package {
+  BackgroundColor  #12171E
+  BorderColor      #39414C
+  FontColor        #AEB9C6
+}

@@ -1,0 +1,123 @@
+' Shared light-mode style. Copied to build/style.puml by tools/render-diagrams.sh.
+' Every diagram includes "style.puml"; the render script decides which one that is.
+
+skinparam backgroundColor        #FFFFFF
+skinparam defaultFontName        "Helvetica Neue"
+skinparam defaultFontSize        13
+skinparam defaultMonospacedFontName "Menlo"
+skinparam shadowing              false
+skinparam roundCorner            6
+skinparam ArrowColor             #44546A
+skinparam ArrowFontColor         #2F3B4C
+skinparam ArrowFontSize          12
+skinparam NoteBackgroundColor    #FFF8DC
+skinparam NoteBorderColor        #D9C89A
+skinparam NoteFontColor          #4A4230
+skinparam NoteFontSize           12
+skinparam TitleFontSize          15
+skinparam TitleFontColor         #1F2933
+
+!$phoneFill    = "#DBEAFE"
+!$phoneLine    = "#7FA6D9"
+!$pumpFill     = "#FEE2E2"
+!$pumpLine     = "#D98A8A"
+!$storeFill    = "#E7E3F7"
+!$storeLine    = "#A79BD1"
+!$boxPhone     = "#EFF5FE"
+!$boxPump      = "#FEF3F3"
+!$accent       = "#B45309"
+!$muted        = "#6B7280"
+
+' Sequence-diagram highlight colours
+!$noteWarn   = "#FFF4E0"
+!$noteBad    = "#FFE8E8"
+!$noteGood   = "#D8EBD5"
+
+' Activity-diagram swimlanes
+!$laneUser     = "#F7F4EC"
+!$laneApp      = "#F2F6FC"
+!$lanePump     = "#FBF2F2"
+
+' Activity node classes. Diagram sources reference these by name so the sources
+' stay theme-agnostic: ":Delivered; <<ok>>" rather than a literal colour.
+<style>
+activity {
+  .commit { BackGroundColor #FDE9C8; LineColor #D9A441; FontColor #4A3A17; }
+  .ambig  { BackGroundColor #F6D9D9; LineColor #C87B7B; FontColor #5A2626; }
+  .block  { BackGroundColor #EBD9F0; LineColor #A87BC0; FontColor #45285A; }
+  .ok     { BackGroundColor #D8EBD5; LineColor #6F9C78; FontColor #24451F; }
+}
+state {
+  .ready   { BackGroundColor #D8EBD5; LineColor #6F9C78; FontColor #24451F; }
+  .blocked { BackGroundColor #EBD9F0; LineColor #A87BC0; FontColor #45285A; }
+  .fault   { BackGroundColor #F6D9D9; LineColor #C87B7B; FontColor #5A2626; }
+  .pending { BackGroundColor #FDE9C8; LineColor #D9A441; FontColor #4A3A17; }
+}
+</style>
+
+skinparam sequence {
+  ParticipantBorderColor      #8FA3BF
+  ParticipantBackgroundColor  #EEF2F7
+  ParticipantFontColor        #1F2933
+  ParticipantFontSize         13
+  ActorBorderColor            #8FA3BF
+  ActorBackgroundColor        #EEF2F7
+  LifeLineBorderColor         #B4BECD
+  LifeLineBackgroundColor     #FFFFFF
+  BoxBorderColor              #C3CEDD
+  BoxFontColor                #4A5568
+  BoxFontSize                 13
+  GroupBorderColor            #8A94A6
+  GroupBackgroundColor        #F4F6FA
+  GroupHeaderFontColor        #1F2933
+  GroupFontColor              #1F2933
+  DividerBackgroundColor      #EEF2F7
+  DividerBorderColor          #C3CEDD
+  ReferenceBackgroundColor    #F4F6FA
+}
+
+skinparam state {
+  BackgroundColor    #EEF2F7
+  BorderColor        #8FA3BF
+  FontColor          #1F2933
+  AttributeFontColor #4A5568
+  AttributeFontSize  11
+  StartColor         #44546A
+  EndColor           #44546A
+}
+
+skinparam activity {
+  BackgroundColor          #EEF2F7
+  BorderColor              #8FA3BF
+  FontColor                #1F2933
+  DiamondBackgroundColor   #FFF4E0
+  DiamondBorderColor       #D9B36A
+  DiamondFontColor         #4A4230
+  StartColor               #44546A
+  EndColor                 #44546A
+  BarColor                 #8FA3BF
+}
+
+skinparam swimlane {
+  BorderColor      #C3CEDD
+  TitleFontColor   #1F2933
+  TitleFontSize    13
+}
+
+skinparam component {
+  BackgroundColor  #EEF2F7
+  BorderColor      #8FA3BF
+  FontColor        #1F2933
+}
+
+skinparam rectangle {
+  BackgroundColor  #F8FAFC
+  BorderColor      #C3CEDD
+  FontColor        #4A5568
+}
+
+skinparam package {
+  BackgroundColor  #F8FAFC
+  BorderColor      #C3CEDD
+  FontColor        #4A5568
+}

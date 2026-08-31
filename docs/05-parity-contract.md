@@ -232,16 +232,10 @@ both places.
 A contract nobody checks is a wish. The mechanism is a single scenario table,
 held as data, executed by three runners.
 
-```mermaid
-flowchart LR
-    ST["Scenario table<br/>preconditions, injected fault,<br/>expected observable outcome"]
-    JVM["JVM runner<br/>LoopbackTransport + PumpCore"]
-    AND["Android instrumented runner<br/>two physical devices"]
-    IOS["iOS XCTest runner<br/>specified, not built"]
-    ST --> JVM
-    ST --> AND
-    ST --> IOS
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="img/05-scenario-runners-dark.svg">
+  <img alt="One scenario table driving three runners" src="img/05-scenario-runners-light.svg">
+</picture>
 
 Each row asserts an entry from Part 1. No row asserts anything about a platform
 API, which is what makes one table able to drive all three.

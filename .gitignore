@@ -20,5 +20,7 @@ captures/
 
 .DS_Store
 
-.mermaid-check/
 node_modules/
+
+# Fetched by tools/render-diagrams.sh; ~28 MB, not a source artifact.
+.tools/

@@ -1,0 +1,65 @@
+@startuml
+!include style.puml
+
+title Bolus, happy path
+
+box "Phone" $boxPhone
+  participant "Bolus Screen" as UI $phoneFill
+  participant "DeliverBolusUseCase" as UC $phoneFill
+  participant "Command Journal" as JN $storeFill
+  participant "Transport L1-L3" as TX $phoneFill
+end box
+
+box "Pump" $boxPump
+  participant "GATT Server" as GS $pumpFill
+  participant "Pump Core" as FW $pumpFill
+end box
+
+autonumber
+
+UI -> UC ++ : ConfirmBolus 4.5 U
+UC -> JN ++ : allocate CommandId
+JN --> UC -- : 0x1A7F
+UC -> JN ++ : write PENDING, flush
+JN --> UC -- : committed
+note right of JN : durable before any radio traffic
+
+UC -> JN : mark IN_FLIGHT
+UC -> TX ++ : BOLUS_REQ cmd = 0x1A7F, 4500 mU
+TX -> GS ++ : write CMD, 1 fragment
+GS --> TX : ATT write response
+note over TX $noteBad
+  Transport acknowledgement only.
+  **Not** evidence of delivery.
+end note
+
+GS -> FW ++ : BOLUS_REQ cmd = 0x1A7F
+FW -> FW : no existing record for 0x1A7F
+FW -> FW : validate against pump limits
+FW -> FW : commit record ACCEPTED
+FW -> FW : begin actuation, record IN_PROGRESS
+FW --> GS : record snapshot
+GS ->> TX : notify RSP, BOLUS_RSP IN_PROGRESS
+TX --> UC : IN_PROGRESS, 0 of 4500 mU
+UC --> UI : state = Delivering
+
+loop until complete
+  FW ->> TX : BOLUS_PROGRESS_IND
+  TX --> UC : delivered so far
+  UC --> UI : state = Delivering, n of 4500 mU
+end
+
+FW -> FW : record COMPLETED, 4500 mU
+FW ->> TX : BOLUS_RSP COMPLETED
+deactivate FW
+deactivate GS
+TX --> UC -- : COMPLETED, 4500 mU
+UC -> JN : mark CONFIRMED_COMPLETED
+UC --> UI -- : state = Delivered, 4.5 U
+
+note over UI, FW $noteGood
+  Only a pump-confirmed record justifies
+  rendering delivery. REQ-S-05, invariant I-4.
+end note
+
+@enduml

@@ -1,0 +1,35 @@
+@startuml
+!include style.puml
+
+title Fragmentation at the minimum MTU
+
+participant "Transport L1" as TX $phoneFill
+participant "GATT Server L1" as GS $pumpFill
+
+autonumber
+
+note over TX, GS
+  ATT_MTU = 23, so 19 octets of
+  fragment payload per write
+end note
+
+note over TX
+  BOLUS_REQ PDU is 22 octets:
+  8 header + 4 payload + 8 MAC + 2 CRC
+end note
+
+TX -> GS : write CMD, hdr 0x80 FIRST idx 0, 19 octets
+note right of GS : FIRST resets the reassembly buffer
+TX -> GS : write CMD, hdr 0x41 LAST idx 1, 3 octets
+note right of GS : LAST completes, 22 octets passed to L2
+GS ->> TX : BOLUS_RSP, fragmented the same way
+
+note over TX, GS $noteBad
+  The reassembly buffer is discarded on disconnection,
+  on a FIRST arriving mid-message, on an index
+  discontinuity, and above 512 octets. A buffer that
+  survives a disconnection is how two unrelated messages
+  get spliced into one valid-looking PDU. Hazard H-09.
+end note
+
+@enduml

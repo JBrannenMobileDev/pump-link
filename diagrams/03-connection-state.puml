@@ -1,0 +1,44 @@
+@startuml
+!include style.puml
+
+title Connection state machine, top level
+
+state Recovering <<pending>>
+state Failed <<fault>>
+state Unpaired <<fault>>
+
+[*] --> Idle
+Idle --> Active : StartRequested
+
+state Active {
+  state Linking : refined in the\nnext diagram
+  state Ready <<ready>>
+  state Suspended <<blocked>>
+
+  [*] --> Linking
+  Linking        --> Authenticating : Subscribed
+  Authenticating --> Reconciling    : AuthSucceeded
+  Reconciling    --> Ready          : ReconcileDone\n[nothing unresolved]
+  Reconciling    --> Suspended      : ReconcileDone\n[unresolved remain]\nor T_RESOLVE expired
+  Suspended      --> Reconciling    : UserVerifiedAtPump
+}
+
+Active --> Recovering : Disconnected / Timeout / GattFailure,\nfrom any substate
+Active --> Idle       : StopRequested / ScanTimeout
+
+Authenticating --> Unpaired : AuthFailed\n[bond or key invalid]
+
+Recovering --> Active : backoff elapsed\n[attempts < max]
+Recovering --> Failed : attempts exhausted
+Failed     --> Active : StartRequested
+
+Unpaired --> [*]
+
+note right of Reconciling
+  Reconciling sits between Authenticating
+  and Ready, so "no dosing on a session
+  with unresolved history" holds by
+  reachability, not by convention.
+end note
+
+@enduml
