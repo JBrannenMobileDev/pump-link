@@ -1,0 +1,47 @@
+# Only the rules this project relies on as controls. Everything else comes from
+# detekt's defaults via buildUponDefaultConfig.
+#
+# The rule that matters here is ElseCaseInsteadOfExhaustiveWhen. ADR-02 claims
+# that adding a state or an intent breaks the build until every screen handles
+# it. That claim is only true while nobody writes `else`, so the claim needs a
+# mechanism rather than a convention.
+#
+# KNOWN GAP: the rule needs type resolution to tell whether a `when` subject is
+# sealed. detekt 1.23.8 only creates type-resolution tasks (detektMain) for
+# plain JVM modules; it does not create them for AGP 9 Android modules. So the
+# rule is enforced in :protocol, :domain, and :simulator, and is NOT enforced in
+# :app or :data. That is backwards from where it matters most, since the MVI
+# reducers are destined for :app. Two ways out, neither taken yet: move the
+# reducers into a pure module, or move to detekt 2.x once it leaves alpha.
+# Recorded here rather than left as a silent hole.
+
+build:
+  maxIssues: 0
+
+potential-bugs:
+  ElseCaseInsteadOfExhaustiveWhen:
+    active: true
+  ExitOutsideMain:
+    active: true
+  UnsafeCallOnNullableType:
+    active: true
+
+style:
+  # A missing branch should surface as a compile error, not be papered over.
+  UnusedPrivateMember:
+    active: true
+  MaxLineLength:
+    active: true
+  ReturnCount:
+    active: false
+  MagicNumber:
+    active: false
+
+complexity:
+  LongMethod:
+    active: true
+    threshold: 80
+  CyclomaticComplexMethod:
+    # Protocol reducers are legitimately branchy; the state machine is the
+    # complexity, not an accident of style.
+    active: false
