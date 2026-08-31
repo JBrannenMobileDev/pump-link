@@ -96,11 +96,16 @@ case (ACCEPTED or IN_PROGRESS)
   :Journal CONFIRMED_COMPLETED;
   :Delivered; <<ok>>
   stop
-case (EVICTED)
+case (EVICTED or\nSTORE_REPLACED)
   :Journal INDETERMINATE;
   :Indeterminate.\nVerify at the pump.; <<block>>
   stop
 case (NEVER_SEEN)
+  note right
+    No record, //and// inside the retention
+    window, //and// the same storeInstanceId.
+    All three, or it is not NEVER_SEEN.
+  end note
   :Evaluate the reissue guard:\nunder 60 s, screen foregrounded,\nno intervening action, first reissue;
   if (Guard met?) then (no)
     |User|

@@ -56,7 +56,9 @@ Neither path allocates a new one. (REQ-S-08)
 
 ## The reissue guard
 
-`NEVER_SEEN` proves the dose did not happen, so reissuing is safe with respect to
+`NEVER_SEEN` proves the dose did not happen — the pump has no record, the
+identifier is inside the retention window, and the record store is the same one
+the command was sent to. Reissuing is therefore safe with respect to
 double-dosing. It is not automatically safe with respect to *intent*: enough time
 may have passed that the user has walked away, eaten, or dosed by another route,
 and delivering insulin to an unattended phone screen is its own hazard.
@@ -94,7 +96,7 @@ Every path ends in exactly one of these, and each is a distinct, persistent
 | Partially delivered | Pump-confirmed `ABORTED`; delivered volume and reason known | Yes |
 | Not delivered | Pump-confirmed `NEVER_SEEN`; user declined reissue | Yes |
 | Blocked, awaiting reconciliation | Could not reach the pump to resolve an in-flight command | **No** |
-| Indeterminate | Reconciled, but the record had been evicted | **No**, until the user confirms at the pump |
+| Indeterminate | Reconciled, but the record had been evicted or the store replaced | **No**, until the user confirms at the pump |
 
 The last two block further dosing. That is the correct behavior and it is
 enforced in the state machine rather than in the UI: the bolus operation is only

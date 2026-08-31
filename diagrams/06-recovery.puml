@@ -46,7 +46,7 @@ critical resolve every in-flight entry before Ready
   UC -> TX ++ : QUERY_COMMAND_OUTCOME cmd = 0x1A7F
   TX -> GS ++ : write CMD
   GS -> FW ++ : look up delivery record
-  FW --> GS -- : IN_PROGRESS, 1200 of 4500 mU\noldestRetained = 0x1900
+  FW --> GS -- : IN_PROGRESS, 1200 of 4500 mU\noldestRetained = 0x1900\nstoreInstanceId = 0x9C3F..
   GS --> TX -- : QUERY_COMMAND_OUTCOME_RSP
   TX --> UC -- : IN_PROGRESS, 1200 mU
   UC --> UI : state = Delivering, 1.2 of 4.5 U
@@ -54,8 +54,9 @@ critical resolve every in-flight entry before Ready
 
 else outcome = NEVER_SEEN
   note right of UC
-    cmd is newer than oldestRetained,
-    so absence proves zero actuation
+    cmd is newer than oldestRetained //and//
+    storeInstanceId is unchanged, so
+    absence proves zero actuation
   end note
   UC -> TX : reissue BOLUS_REQ, same cmd = 0x1A7F
 
@@ -63,6 +64,15 @@ else outcome = EVICTED
   note right of UC
     cmd is older than oldestRetained.
     Absence proves nothing.
+  end note
+  UC -> JN : mark INDETERMINATE
+  UC --> UI : state = Indeterminate, verify at pump
+
+else outcome = STORE_REPLACED
+  note right of UC
+    storeInstanceId changed, so the
+    watermark moved backwards and
+    absence proves nothing.
   end note
   UC -> JN : mark INDETERMINATE
   UC --> UI : state = Indeterminate, verify at pump

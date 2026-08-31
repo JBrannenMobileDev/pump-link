@@ -191,14 +191,14 @@ re-executed.
 | `0x04` | `AUTH_VERIFY_RSP` | `mac` (16) |
 | `0x05` | `SESSION_END` | — |
 | `0x10` | `GET_STATUS_REQ` | — |
-| `0x11` | `GET_STATUS_RSP` | `reservoirMilliunits` (2), `batteryPercent` (1), `deliveryActive` (1), `recordEpoch` (4) |
+| `0x11` | `GET_STATUS_RSP` | `reservoirMilliunits` (2), `batteryPercent` (1), `deliveryActive` (1), `recordEpoch` (4), `storeInstanceId` (8) |
 | `0x20` | `BOLUS_REQ` | `requestedMilliunits` (2), `maxDurationSeconds` (2) |
 | `0x21` | `BOLUS_RSP` | delivery record (see below) |
 | `0x22` | `BOLUS_CANCEL_REQ` | — (targets `CommandId`) |
 | `0x23` | `BOLUS_CANCEL_RSP` | delivery record |
 | `0x24` | `BOLUS_PROGRESS_IND` | `deliveredMilliunits` (2) — unsolicited |
 | `0x30` | `QUERY_COMMAND_OUTCOME_REQ` | — (targets `CommandId`) |
-| `0x31` | `QUERY_COMMAND_OUTCOME_RSP` | `outcome` (1), delivery record, `oldestRetainedCommandId` (4) |
+| `0x31` | `QUERY_COMMAND_OUTCOME_RSP` | `outcome` (1), delivery record, `oldestRetainedCommandId` (4), `storeInstanceId` (8) |
 | `0x32` | `GET_HISTORY_REQ` | `sinceCommandId` (4) |
 | `0x33` | `GET_HISTORY_RSP` | `count` (1), delivery records |
 | `0x7E` | `ACK` | — |
@@ -264,7 +264,24 @@ design, and [00-overview.md](00-overview.md#security-posture) says so plainly.
 
 This is the part of the protocol that carries the safety argument.
 
-The pump maintains a persistent, ordered store of delivery records:
+The pump maintains a persistent, ordered store of delivery records. The store as
+a whole carries two identifiers, distinct from the records in it:
+
+| Field | Size | Notes |
+| --- | --- | --- |
+| `storeInstanceId` | 8 | Random; regenerated **only** when the store is created or cleared |
+| `recordEpoch` | 4 | Increments on every change to the store |
+
+`recordEpoch` answers "has anything happened since I last looked," which is a
+cheap change-detection question. `storeInstanceId` answers "is this the same
+store I was talking to," which is a different question and the one that
+[`NEVER_SEEN`](#query_command_outcome-and-what-unknown-actually-means) depends
+on. Conflating them is a mistake worth naming, because an epoch is the obvious
+thing to reach for and it cannot carry the safety argument: it is *expected* to
+differ on every reconnect, so a controller has no way to tell twelve intervening
+doses from a wiped store.
+
+Each record holds:
 
 | Field | Size | Notes |
 | --- | --- | --- |
@@ -296,26 +313,46 @@ review.
 
 | Outcome | Meaning | Controller action |
 | --- | --- | --- |
-| `NEVER_SEEN` | No record, and `commandId` is newer than `oldestRetainedCommandId` | Provably not actuated. Safe to reissue with the same `CommandId`. |
+| `NEVER_SEEN` | No record, `commandId` is newer than `oldestRetainedCommandId`, **and** `storeInstanceId` equals the one recorded when the command was sent | Provably not actuated. Safe to reissue with the same `CommandId`. |
 | `ACCEPTED` | Committed, actuation not yet started | Await progress; do not reissue. |
 | `IN_PROGRESS` | Actuating now | Await completion; do not reissue. |
 | `COMPLETED` | Finished | Record `deliveredMilliunits` as the truth. |
 | `ABORTED` | Stopped before completion | `deliveredMilliunits` is the truth; surface the reason. |
 | `EVICTED` | No record, but `commandId` is older than `oldestRetainedCommandId` | **Indeterminate.** Not safe to reissue. Enter the indeterminate state per REQ-S-07. |
+| `STORE_REPLACED` | No record, and `storeInstanceId` differs from the one recorded at send time | **Indeterminate.** Not safe to reissue. Enter the indeterminate state per REQ-S-07. |
 
-The distinction between `NEVER_SEEN` and `EVICTED` is the one that is easy to
-miss and unsafe to miss.
+Three of these outcomes mean "I have no record." Separating them is the point.
 
 "No record found" only proves "no insulin was delivered" while the record for
-that command *would still be retained if it existed*. The record store is
-finite. Once it wraps, absence stops being evidence, and a design that returns a
-single undifferentiated `UNKNOWN` will confidently reissue a dose that already
-happened — the exact double-dose the scheme exists to prevent, reintroduced by
-an implementation detail of the storage layer.
+that command *would still be retained if it existed*. That premise fails in two
+independent ways, and a design that returns a single undifferentiated `UNKNOWN`
+will confidently reissue a dose that already happened — the exact double-dose
+the scheme exists to prevent, reintroduced by an implementation detail of the
+storage layer.
 
-So the pump reports `oldestRetainedCommandId` alongside every outcome, and
-absence is only interpreted as "never happened" for identifiers that fall inside
-the retention window.
+**The store is finite.** Once it wraps, absence stops being evidence for old
+identifiers. So the pump reports `oldestRetainedCommandId` alongside every
+outcome, and absence is read as "never happened" only inside the retention
+window. Outside it, `EVICTED`.
+
+**The store can be replaced.** A factory reset, a firmware update that migrates
+storage, or recovery from a corrupted store all produce a pump whose record
+store is empty and whose `oldestRetainedCommandId` has restarted low. Every
+outstanding `CommandId` then compares as "inside the retention window" and the
+window test alone reports `NEVER_SEEN` — for doses the previous store may well
+have delivered. The window test is a comparison against a watermark, and a reset
+moves the watermark backwards, so the comparison silently changes meaning.
+
+`storeInstanceId` closes that. The controller records it on the journal entry
+when the command is sent, and re-checks it at query time. If the store is not
+the same store, absence proves nothing about actuation, so the outcome is
+`STORE_REPLACED` and resolution needs a human at the pump, exactly as with
+`EVICTED`. The two share a controller action but not a cause, and are kept
+distinct so the journal says which one happened.
+
+This is the weaker sibling of the eviction argument and is easier to miss,
+because eviction is visible in the data structure while a reset is visible only
+in its absence.
 
 **Retention.** Controllers allocate `CommandId` monotonically from a persisted
 counter, which makes the comparison well-defined. The store retains a minimum of
@@ -323,6 +360,11 @@ counter, which makes the comparison well-defined. The store retains a minimum of
 lifetime at any plausible dosing rate, and comparisons are unsigned with no
 wrap handling — an assumption recorded here so that it is falsifiable rather
 than buried.
+
+**Out of scope.** Replacing the pump hardware and pairing to a new one is a
+clinical workflow, not a protocol recovery path. The new pump is a different
+device with a different identity, and any command outstanding against the old
+one is resolved against the old one or not at all.
 
 ## Invariants
 
@@ -333,7 +375,9 @@ Stated so they can be asserted in tests rather than assumed in review.
 - **I-2.** For any `CommandId`, total actuated volume across all time is at most
   `requestedMilliunits` of its single record.
 - **I-3.** A `NEVER_SEEN` outcome implies zero actuated volume for that
-  `CommandId`.
+  `CommandId`. This holds only because `NEVER_SEEN` requires both an unbroken
+  `storeInstanceId` and an in-window `commandId`; drop either condition and the
+  invariant becomes an assumption.
 - **I-4.** The controller's rendered delivery state is a function of pump-confirmed
   records only, never of a GATT write callback. (REQ-S-05)
 - **I-5.** No `BOLUS_REQ` is transmitted on a session whose reconciliation phase

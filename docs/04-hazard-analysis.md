@@ -55,14 +55,16 @@ instead of guessing.
 | H-12 | The phone loses the `CommandId` for a command that may be in progress. Permanently unresolvable. | Critical | Process death after transmitting but before journaling | Journal is committed and flushed before transmission; a foreground service of type `connectedDevice` runs for the duration of an in-flight command (REQ-S-02) | `JournalPrecedesTransmitTest`; process-death instrumented case |
 | H-13 | The app permits a dose the pump would refuse, or refuses one the pump would permit. | Serious | Safety limits duplicated in two places and drifting apart | The pump is the sole enforcement point. App-side limits are advisory, exist only for early feedback, and never gate what the pump will accept | `AppLimitsAreAdvisoryTest` asserts the pump independently rejects an over-limit request that bypasses the app check |
 | H-14 | The user acts on pump state that changed while the app was absent. | Serious | The device can be serviced with no phone present ([00-overview.md](00-overview.md#a-requirement-worth-deriving-explicitly)) | `recordEpoch` in `STATUS` detects out-of-band change cheaply; reconciliation and history sync complete before `Ready` | `EpochChangeForcesHistorySyncTest` |
+| H-15 | A command outstanding across a record-store reset is treated as never delivered and reissued. Hypoglycemia. | Catastrophic | Factory reset, storage migration, or corruption recovery empties the store and restarts `oldestRetainedCommandId` low, so the retention-window test reports every outstanding command as in-window | `storeInstanceId` is recorded on the journal entry at send time and re-checked at query time; a mismatch yields `STORE_REPLACED` and is indeterminate, never a reissue | `StoreResetIsNotNeverSeenTest` asserts a command outstanding across a store reset never produces a reissue |
 
 ## The three worth expanding
 
-### H-01 and H-04 are the same hazard with different causes
+### H-01, H-04, and H-15 are the same hazard with different causes
 
-Both end in a repeated dose. H-01 is defended by the delivery record; H-04 is the
-observation that the record's finiteness is itself a failure mode of that
-defense.
+All three end in a repeated dose. H-01 is defended by the delivery record. H-04
+and H-15 are the observation that the record store has properties of its own —
+it is finite, and it can be destroyed — and that each of those is a failure mode
+of the defense rather than a detail beneath it.
 
 This is the failure mode most likely to survive design review, because the
 control for H-01 is obviously correct and the reviewer stops there. "We key on a
@@ -77,6 +79,15 @@ that the controller can tell the difference between "I know this did not happen"
 and "I no longer know." Those are different answers and a protocol that returns
 one value for both has thrown away the distinction that the safety argument
 depends on.
+
+H-15 is the same argument applied to the store's existence rather than its size,
+and it is the easier one to miss. Eviction is visible in the data structure and
+invites the question. A reset is visible only as an absence, and the watermark
+that defends against eviction moves *backwards* when it happens — so the
+retention test does not merely fail to help, it actively returns the dangerous
+answer. Reporting where the boundary is only works if the controller can also
+tell that it is still looking at the same boundary, which is what
+`storeInstanceId` is for.
 
 ### H-02 is the hazard that naive designs create while fixing H-01
 

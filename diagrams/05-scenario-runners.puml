@@ -5,8 +5,8 @@ title One scenario table, three runners
 
 rectangle "**Scenario table**\npreconditions, injected fault,\nexpected observable outcome" as ST $storeFill
 
-rectangle "**JVM runner**\nLoopbackTransport + PumpCore\n16 of 19 rows, every push" as JVM $phoneFill
-rectangle "**Android instrumented runner**\ntwo physical devices\n19 of 19 rows" as AND $phoneFill
+rectangle "**JVM runner**\nLoopbackTransport + PumpCore\n17 of 20 rows, every push" as JVM $phoneFill
+rectangle "**Android instrumented runner**\ntwo physical devices\n20 of 20 rows" as AND $phoneFill
 rectangle "**iOS XCTest runner**\nspecified, not built" as IOS $pumpFill
 
 ST --> JVM

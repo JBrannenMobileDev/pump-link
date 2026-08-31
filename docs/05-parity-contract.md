@@ -261,10 +261,12 @@ API, which is what makes one table able to drive all three.
 | SC-17 | Process death mid-command | OB-13 | no | yes | spec |
 | SC-18 | Reconnect after simulated patch change | OB-01 | yes | yes | spec |
 | SC-19 | Replay of a captured PDU into a new session | OB-04 | yes | yes | spec |
+| SC-20 | Record store reset while a command is outstanding | OB-07 | yes | yes | spec |
 
-Sixteen of nineteen rows run on the JVM in CI on every push. Three require a
-device because they are about process lifecycle, which is precisely the area
-where the platforms differ most and where a shared table earns the most.
+Seventeen of twenty rows run on the JVM in CI on every push. Three require a
+device because they are about process lifecycle and platform service caching,
+which is precisely the area where the platforms differ most and where a shared
+table earns the most.
 
 **The iOS column says `spec`, not `pass`.** No iOS implementation was built here.
 The column states what the table would assert, and its value is that the
