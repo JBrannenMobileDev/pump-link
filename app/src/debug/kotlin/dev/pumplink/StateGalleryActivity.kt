@@ -16,6 +16,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -34,11 +35,15 @@ import dev.pumplink.presentation.BolusScenarios
 class StateGalleryActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val requested = intent.getStringExtra(EXTRA_SCENARIO)
+        val requested = mutableStateOf(intent.getStringExtra(EXTRA_SCENARIO))
+        addOnNewIntentListener { incoming ->
+            setIntent(incoming)
+            requested.value = incoming.getStringExtra(EXTRA_SCENARIO)
+        }
         setContent {
             PumpLinkTheme {
                 Surface(modifier = Modifier.fillMaxSize()) {
-                    Gallery(requested)
+                    Gallery(requested.value)
                 }
             }
         }
@@ -51,9 +56,13 @@ class StateGalleryActivity : ComponentActivity() {
 
 @Composable
 private fun Gallery(requested: String?) {
-    val initial = BolusScenarios.all.firstOrNull { it.name == requested }
-        ?: BolusScenarios.all.first()
-    var selected by remember { mutableStateOf(initial) }
+    val fromIntent = BolusScenarios.all.firstOrNull { it.name == requested }
+    var selected by remember {
+        mutableStateOf(fromIntent ?: BolusScenarios.all.first())
+    }
+    LaunchedEffect(requested) {
+        fromIntent?.let { selected = it }
+    }
     val scripted = requested != null
     Column(modifier = Modifier.fillMaxSize()) {
         if (!scripted) {

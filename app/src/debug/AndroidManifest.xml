@@ -4,6 +4,7 @@
         <activity
             android:name=".StateGalleryActivity"
             android:exported="true"
-            android:label="pump-link gallery" />
+            android:label="pump-link gallery"
+            android:launchMode="singleTop" />
     </application>
 </manifest>
