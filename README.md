@@ -4,8 +4,8 @@
 [![docs](https://github.com/JBrannenMobileDev/pump-link/actions/workflows/docs.yml/badge.svg)](https://github.com/JBrannenMobileDev/pump-link/actions/workflows/docs.yml)
 
 A reference design for delivering a non-idempotent command to a medical device
-over an unreliable BLE link. The concrete feature is a user-initiated insulin
-bolus. Nothing here is a medical device; no insulin moves.
+over an unreliable BLE link. The concrete feature is a user initiated insulin
+bolus. 
 
 The interesting problem is not the bolus. It is that the transport fails
 ambiguously, the command is not idempotent, and the pump's state can advance
