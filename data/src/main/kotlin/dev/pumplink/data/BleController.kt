@@ -23,6 +23,7 @@ import dev.pumplink.domain.JournalState
 import dev.pumplink.domain.LinkProgress
 import dev.pumplink.domain.LinkStatus
 import dev.pumplink.domain.Milliunits
+import dev.pumplink.domain.PumpRepository
 import dev.pumplink.domain.PumpSummary
 import dev.pumplink.domain.Resolution
 import dev.pumplink.domain.ResolveInFlightCommandUseCase
@@ -63,37 +64,37 @@ import java.util.concurrent.atomic.AtomicInteger
 @SuppressLint("MissingPermission")
 class BleController(
     private val context: Context,
-    private val journal: CommandJournal,
+    private val commandLog: CommandJournal,
     private val pairingKey: ByteArray,
     private val paired: LogicalDeviceId,
     private val controllerId: LogicalDeviceId,
     private val ids: PersistentCommandIds,
     private val scope: CoroutineScope,
-) {
+) : PumpRepository {
     private val transport = BleTransport(context, scope)
     private val session = Session(transport, pairingKey, controllerId, paired)
-    private val deliver = DeliverBolusUseCase(journal, ids) { System.currentTimeMillis() }
-    private val resolve = ResolveInFlightCommandUseCase(journal)
+    private val deliver = DeliverBolusUseCase(commandLog, ids) { System.currentTimeMillis() }
+    private val resolve = ResolveInFlightCommandUseCase(commandLog)
 
     private val _link = MutableStateFlow<LinkState>(LinkState.Idle)
     private val _linkStatus = MutableStateFlow<LinkStatus>(LinkStatus.Idle)
-    val linkStatus: StateFlow<LinkStatus> = _linkStatus
+    override val linkStatus: StateFlow<LinkStatus> = _linkStatus
 
     private val _linkProgress = MutableStateFlow(LinkProgress())
-    val linkProgress: StateFlow<LinkProgress> = _linkProgress
+    override val linkProgress: StateFlow<LinkProgress> = _linkProgress
 
     /** Set while an outcome query is outstanding, so the UI can say it is asking. */
     private val _resolving = MutableStateFlow<DomainCommandId?>(null)
-    val resolving: StateFlow<DomainCommandId?> = _resolving
+    override val resolving: StateFlow<DomainCommandId?> = _resolving
 
     private val _pump = MutableStateFlow<PumpSummary?>(null)
-    val pump: StateFlow<PumpSummary?> = _pump
+    override val pump: StateFlow<PumpSummary?> = _pump
 
     private val _vitalsStale = MutableStateFlow(false)
-    val vitalsStale: StateFlow<Boolean> = _vitalsStale
+    override val vitalsStale: StateFlow<Boolean> = _vitalsStale
 
     /** Hex of the paired logical identity, for the link screen. */
-    val pairedIdentity: String get() = paired.toString()
+    override val pairedIdentity: String get() = paired.toString()
 
     /** Last transport failure message, for diagnostics on the link screen. */
     var lastTransportError: String? = null
@@ -101,14 +102,12 @@ class BleController(
 
     private var statusReadAttempts = 0
 
-    private val _revision = MutableStateFlow(0)
-    val revision: StateFlow<Int> = _revision
+    private val _journal = MutableStateFlow(commandLog.snapshot())
+    override val journal: StateFlow<JournalSnapshot> = _journal
 
     private fun bump() {
-        _revision.value = _revision.value + 1
+        _journal.value = commandLog.snapshot()
     }
-
-    val journalSnapshot: JournalSnapshot get() = journal.snapshot()
 
     private var timeoutJob: Job? = null
     private var pollJob: Job? = null
@@ -217,7 +216,7 @@ class BleController(
         )
     }
 
-    fun start() {
+    override fun start() {
         statusReadAttempts = 0
         if (!isAdapterEnabled()) {
             lastTransportError = "bluetooth off"
@@ -227,11 +226,11 @@ class BleController(
         dispatch(LinkEvent.StartRequested(paired))
     }
 
-    fun stop() {
+    override fun stop() {
         dispatch(LinkEvent.StopRequested)
     }
 
-    suspend fun deliverBolus(milliunits: Int) {
+    override suspend fun deliverBolus(dose: Dose) {
         // Journal-before-transmit is for an ambiguous radio, not a radio we
         // already know is off. Preparing here would pin an in-flight command
         // that the pump never had a chance to see.
@@ -246,8 +245,8 @@ class BleController(
             return
         }
         val store = _pump.value?.storeInstanceId ?: DomainStoreId(0uL)
-        val entry = deliver.prepare(Dose(Milliunits(milliunits)), store)
-        transact { transmitBolus(entry.commandId, milliunits, store) }
+        val entry = deliver.prepare(dose, store)
+        transact { transmitBolus(entry.commandId, dose.milliunits.value, store) }
     }
 
     /**
@@ -256,22 +255,22 @@ class BleController(
      * pump and could deliver a second dose, which is the whole reason the
      * CommandId is client-generated and journaled before transmission.
      */
-    suspend fun reissue(commandId: DomainCommandId, milliunits: Int) {
+    override suspend fun reissue(commandId: DomainCommandId, dose: Dose) {
         val store = _pump.value?.storeInstanceId ?: DomainStoreId(0uL)
         resolve.resolve(commandId, Resolution.InFlight)
         bump()
-        transact { transmitBolus(commandId, milliunits, store) }
+        transact { transmitBolus(commandId, dose.milliunits.value, store) }
     }
 
     /** Records that a human reconciled this command against the pump. */
-    suspend fun acknowledge(commandId: DomainCommandId) {
+    override suspend fun acknowledge(commandId: DomainCommandId) {
         resolve.acknowledge(commandId)
         dispatch(LinkEvent.UserVerifiedAtPump)
         bump()
     }
 
     /** Re-run reconciliation from [LinkStatus.Suspended]. */
-    fun requestReconcile() {
+    override fun requestReconcile() {
         dispatch(LinkEvent.ReconcileRequested)
     }
 
@@ -359,7 +358,7 @@ class BleController(
     }
 
     private fun settled(commandId: DomainCommandId): Boolean {
-        val latest = journal.snapshot().latest(commandId) ?: return true
+        val latest = commandLog.snapshot().latest(commandId) ?: return true
         return when (latest.state) {
             JournalState.Resolved,
             JournalState.Indeterminate,
@@ -411,7 +410,7 @@ class BleController(
             scope: CoroutineScope,
         ): BleController = BleController(
             context = context,
-            journal = journal,
+            commandLog = journal,
             pairingKey = DemoKeys.PAIRING_KEY,
             paired = DemoKeys.PUMP_ID,
             controllerId = DemoKeys.CONTROLLER_ID,
@@ -516,7 +515,7 @@ class BleController(
                 }
             }
             LinkEffect.BeginReconcile -> scope.launch(Dispatchers.IO) {
-                val open = journal.snapshot().inFlight()
+                val open = commandLog.snapshot().inFlight()
                 // A query that fails leaves its command unresolved on purpose.
                 // Reconcile still finishes and reports the count, because
                 // "some commands are still unresolved" is a state the link
@@ -531,8 +530,8 @@ class BleController(
                             lastTransportError = thrown.message
                         }
                     }
-                    val unresolved = journal.snapshot().inFlight().size +
-                        if (journal.snapshot().hasIndeterminate()) 1 else 0
+                    val unresolved = commandLog.snapshot().inFlight().size +
+                        if (commandLog.snapshot().hasIndeterminate()) 1 else 0
                     dispatch(LinkEvent.ReconcileDone(unresolved))
                 }
             }

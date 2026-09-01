@@ -448,6 +448,68 @@ gallery is `app/src/debug/` only; a release build does not contain it.
 flag, which would duplicate what the journal already knows, or a product
 decision that recovered and first-try deliveries should look identical.
 
+## ADR-10 — `PumpRepository` in `:domain`, session in the service
+
+**Context.** The module diagram already named repository interfaces in `:domain`
+and marked `:app` → `:data` as assembly only. The ViewModel still constructed
+`FileJournal`, `PersistentCommandIds`, and `BleController` on `viewModelScope`,
+and `PumpLinkService` was declared but never started.
+
+**Decision.** `PumpRepository` is a port in `:domain`. `BleController`
+implements it. `PumpSession` sits in front for start/stop policy: Stop is
+refused while the journal is in flight. `PumpLinkApp` is the composition root
+(journal, ids, controller) because `startService` is asynchronous in-process
+and the ViewModel needs a port on first frame. `PumpLinkService` owns
+keep-alive and teardown: it observes `sessionRequested` and the journal,
+promotes to `connectedDevice` foreground when
+`SessionKeepAlive.shouldBeForeground` is true, and stays `START_STICKY`.
+
+The process graph is Hilt (ADR-11). Lifetime — who starts the service, when
+it is foreground — is still this ADR.
+
+**H-12 versus the shipping hold.** H-12 requires the process to be held at
+least while a command is in flight. Android 8+ kills a background started
+service in about a minute, so a shipping controller also holds foreground for
+the whole requested session (`start` until `stop`). That is stricter, not a
+rewrite of the hazard. `stop()` while in flight is ignored.
+
+**Consequences.** The ViewModel has no `dev.pumplink.data` imports. Leaving
+the dosing screen no longer cancels an in-flight coroutine. The cost is an
+Application class, a session decorator, and a service that must call
+`startForeground` within the platform timeout when started via
+`startForegroundService` (process relaunch with in-flight rows).
+
+**What would change this.** A second client of the session (a wear companion,
+a backup activity) that made a bound AIDL API earn its keep, or a product
+decision that idle GATT may die when the user hits Home.
+
+## ADR-11 — Hilt is the composition root
+
+**Context.** ADR-10 assembled `FileJournal`, `PersistentCommandIds`,
+`BleController`, and `PumpSession` in `PumpLinkApp`, and passed the port
+through a `ViewModelProvider.Factory` and a `SessionOwner` cast. That was
+enough to prove the lifetime split. It is not how this codebase would be
+wired on a team that already uses Hilt.
+
+**Decision.** Hilt owns the `SingletonComponent`. `:data` provides the
+journal, command ids, session `CoroutineScope`, and `BleController`, and
+binds `PumpRepository` to `PumpSession`. `@HiltAndroidApp`,
+`@AndroidEntryPoint`, and `@HiltViewModel` replace the factory and the
+Application cast. `PumpLinkApp.onCreate` still starts the service and
+calls `holdForInFlightJournal()` — that is lifetime, not a missing binding.
+
+`:domain` and `:presentation` do not depend on Hilt. ViewModel unit tests
+still construct `BolusViewModel(FakePumpRepository())`.
+
+**Consequences.** Two Gradle plugins (`hilt`, `ksp`) on `:app` and `:data`.
+Kotlin 2.4 metadata may require pinning `kotlin-metadata-jvm` on the KSP
+classpath until Hilt ships a compiler that accepts it. The graph is now
+reviewable as a module rather than as `Application` lines.
+
+**What would change this.** A decision to keep the process graph as explicit
+constructors because the app has one session and will never grow another
+client.
+
 ## Conventions
 
 - Kotlin, coroutines, Gradle Kotlin DSL, version catalog
@@ -455,6 +517,7 @@ decision that recovered and first-try deliveries should look identical.
   AndroidX 1.19 requires it; `targetSdk` matches it. Hardware verification is
   API 33. Rationale in
   [00-overview.md](00-overview.md#verification-boundary)
+- ViewModel depends on `PumpRepository` only; Hilt modules live in `:data`
 - ViewModel exposes `StateFlow` via `stateIn(WhileSubscribed(5_000))`
 - Compose collects with `collectAsStateWithLifecycle()`
 - Composables take `(uiState, onIntent)` and hold no ViewModel reference, so

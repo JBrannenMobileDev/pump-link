@@ -1,16 +1,15 @@
 package dev.pumplink
 
-import android.app.Application
-import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import dev.pumplink.data.BleController
-import dev.pumplink.data.FileJournal
-import dev.pumplink.data.PersistentCommandIds
+import dagger.hilt.android.lifecycle.HiltViewModel
 import dev.pumplink.domain.DomainCommandId
+import dev.pumplink.domain.Dose
 import dev.pumplink.domain.Draft
 import dev.pumplink.domain.LinkProgress
 import dev.pumplink.domain.LinkStatus
 import dev.pumplink.domain.Milliunits
+import dev.pumplink.domain.PumpRepository
 import dev.pumplink.domain.PumpSummary
 import dev.pumplink.domain.SafetyLimits
 import dev.pumplink.presentation.BolusIntent
@@ -25,7 +24,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import java.io.File
+import javax.inject.Inject
 
 private data class LinkSnapshot(
     val status: LinkStatus,
@@ -35,40 +34,35 @@ private data class LinkSnapshot(
     val vitalsStale: Boolean,
 )
 
-class BolusViewModel(application: Application) : AndroidViewModel(application) {
-    private val journal = FileJournal(File(application.filesDir, "journal.log"))
-    private val ids = PersistentCommandIds(File(application.filesDir, "command-id.txt"))
-    private val controller = BleController.demo(
-        context = application,
-        journal = journal,
-        ids = ids,
-        scope = viewModelScope,
-    )
+@HiltViewModel
+class BolusViewModel @Inject constructor(
+    private val pump: PumpRepository,
+) : ViewModel() {
     private val draft = MutableStateFlow(Draft(Milliunits(SafetyLimits.INCREMENT_MILLIUNITS * 20)))
     private val stage = MutableStateFlow(Stage())
 
-    val pairedIdentity: String get() = controller.pairedIdentity
+    val pairedIdentity: String get() = pump.pairedIdentity
 
     private val link = combine(
-        controller.linkStatus,
-        controller.linkProgress,
-        controller.pump,
-        controller.resolving,
-        controller.vitalsStale,
-    ) { status, progress, pump, resolving, vitalsStale ->
-        LinkSnapshot(status, progress, pump, resolving, vitalsStale)
+        pump.linkStatus,
+        pump.linkProgress,
+        pump.pump,
+        pump.resolving,
+        pump.vitalsStale,
+    ) { status, progress, summary, resolving, vitalsStale ->
+        LinkSnapshot(status, progress, summary, resolving, vitalsStale)
     }
 
     val uiState: StateFlow<BolusScreenState> = combine(
         link,
-        controller.revision,
+        pump.journal,
         draft,
         stage,
-    ) { snapshot, _, currentDraft, currentStage ->
+    ) { snapshot, journal, currentDraft, currentStage ->
         screenState(
             link = snapshot.status,
             progress = snapshot.progress,
-            journal = controller.journalSnapshot,
+            journal = journal,
             pump = snapshot.pump,
             draft = currentDraft,
             stage = currentStage,
@@ -82,7 +76,7 @@ class BolusViewModel(application: Application) : AndroidViewModel(application) {
         screenState(
             link = LinkStatus.Idle,
             progress = LinkProgress(),
-            journal = journal.snapshot(),
+            journal = pump.journal.value,
             pump = null,
             draft = draft.value,
             nowMillis = System.currentTimeMillis(),
@@ -90,11 +84,11 @@ class BolusViewModel(application: Application) : AndroidViewModel(application) {
     )
 
     fun start() {
-        controller.start()
+        pump.start()
     }
 
     fun stop() {
-        controller.stop()
+        pump.stop()
     }
 
     fun onIntent(intent: BolusIntent) {
@@ -111,12 +105,12 @@ class BolusViewModel(application: Application) : AndroidViewModel(application) {
             BolusIntent.ReissueConfirmed -> reissue()
             BolusIntent.ReissueDeclined -> declineReissue()
             BolusIntent.PumpVerifiedByUser -> acknowledgeHazard()
-            BolusIntent.RecheckRequested -> controller.requestReconcile()
+            BolusIntent.RecheckRequested -> pump.requestReconcile()
         }
     }
 
     private fun deliver() = viewModelScope.launch {
-        controller.deliverBolus(draft.value.milliunits.value)
+        pump.deliverBolus(Dose(draft.value.milliunits))
     }
 
     /**
@@ -125,18 +119,18 @@ class BolusViewModel(application: Application) : AndroidViewModel(application) {
      * field may have moved on since it was sent.
      */
     private fun reissue() = viewModelScope.launch {
-        val entry = controller.journalSnapshot.awaitingReissue() ?: return@launch
-        controller.reissue(entry.commandId, entry.requested.milliunits.value)
+        val entry = pump.journal.value.awaitingReissue() ?: return@launch
+        pump.reissue(entry.commandId, entry.requested)
     }
 
     private fun declineReissue() = viewModelScope.launch {
-        val entry = controller.journalSnapshot.awaitingReissue() ?: return@launch
-        controller.acknowledge(entry.commandId)
+        val entry = pump.journal.value.awaitingReissue() ?: return@launch
+        pump.acknowledge(entry.commandId)
     }
 
     private fun acknowledgeHazard() = viewModelScope.launch {
-        val entry = controller.journalSnapshot.indeterminate() ?: return@launch
-        controller.acknowledge(entry.commandId)
+        val entry = pump.journal.value.indeterminate() ?: return@launch
+        pump.acknowledge(entry.commandId)
     }
 
     private companion object {

@@ -16,6 +16,7 @@
         android:required="true" />
 
     <application
+        android:name=".PumpLinkApp"
         android:allowBackup="false"
         android:label="pump-link"
         android:supportsRtl="true"
@@ -32,6 +33,7 @@
         <service
             android:name="dev.pumplink.data.PumpLinkService"
             android:exported="false"
+            android:stopWithTask="false"
             android:foregroundServiceType="connectedDevice" />
     </application>
 
