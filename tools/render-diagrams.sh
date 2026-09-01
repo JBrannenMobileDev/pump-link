@@ -13,6 +13,9 @@
 # real gate: GitHub's latest tag can move to a snapshot between a local render
 # and a CI run, and every SVG then "fails" without the sources changing.
 #
+# Layout uses Smetana (PlantUML's Java Graphviz port) so CI on Ubuntu and a
+# local Homebrew Graphviz 15.x do not produce different coordinates.
+#
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -58,7 +61,9 @@ for theme in light dark; do
   done
 
   # -nometadata keeps output byte-stable so --check diffs mean something.
-  java -jar "$JAR" -tsvg -nometadata -failfast2 -o "$stage/out" "$stage/*.puml" >/dev/null
+  # -Playout=smetana keeps layout off the host Graphviz binary.
+  java -jar "$JAR" -tsvg -nometadata -failfast2 -Playout=smetana \
+    -o "$stage/out" "$stage/*.puml" >/dev/null
 
   for svg in "$stage"/out/*.svg; do
     name="$(basename "$svg" .svg)"
