@@ -19,9 +19,10 @@ autonumber
 note over LM : state = Scanning
 GS ->> LM : advertisement + scan response
 note right of LM
-  matched on logical device id from
-  manufacturer data, not on MAC or
-  CBPeripheral handle
+  service UUID match is enough to
+  connect. Advertised identity, when
+  present, is a pre-connect filter,
+  not the proof.
 end note
 
 LM -> GS : connect
@@ -36,6 +37,14 @@ LM -> GS : enable notifications on RSP
 GS --> LM : CCCD confirmed
 
 note over LM : Subscribed.\nTransport usable, no session yet.
+
+LM -> GS : read STATUS
+GS --> LM : version, logicalDeviceId, recordEpoch
+note right of LM
+  normative identity check.
+  mismatch disconnects; match
+  is required to authenticate
+end note
 
 SES -> GS ++ : AUTH_CHALLENGE_REQ, controllerId, nonceC
 GS --> SES -- : AUTH_CHALLENGE_RSP, pumpId, nonceP

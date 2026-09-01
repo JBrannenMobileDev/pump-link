@@ -130,18 +130,32 @@ rather than kept beside it.
 Stated as a boundary rather than left implicit, because an unqualified claim of
 "works" is the less honest option.
 
-- Verified on **Android 14 (API 34)**, on two physical devices, one acting as
-  controller and one as pump simulator.
-- **Not verified on API 35+.** Background execution and foreground service
-  launch restrictions tightened in later releases; extending the compatibility
-  claim would require a separate verification pass.
-- **Not verified on iOS.** The iOS column of
+- **BLE, on hardware.** Controller verified against a real radio on a
+  Samsung Galaxy A32 5G running **Android 13 (API 33)** — that device's last OS
+  version. The pump peripheral is hosted on macOS via CoreBluetooth; the
+  Android device acts only as BLE central. See
+  [05-parity-contract.md](05-parity-contract.md#harness-deviations).
+- **Foreground-service typing is declared, not exercised.** The app declares
+  `foregroundServiceType="connectedDevice"` and
+  `FOREGROUND_SERVICE_CONNECTED_DEVICE`, which Android 14 made mandatory. The
+  hardware under test is API 33, so that enforcement path is not observed. The
+  same "spec, not pass" honesty already applied to the iOS column applies
+  here.
+- **Not verified on API 34+ as a runtime.** `targetSdk` is 37 because AndroidX
+  1.19 requires `compileSdk` 37; lowering `targetSdk` to the tested OS would
+  change nothing on API 33 (behavior changes gate on the lower of `targetSdk`
+  and the running OS) and would cost currency. The claim that was wrong was
+  "verified on Android 14," not the number in the catalog.
+- **Not verified on iOS as a controller.** The iOS *central* column of
   [05-parity-contract.md](05-parity-contract.md) is derived from Apple's
   published documentation and is a specification of required behavior, not a
-  record of observed behavior. It is labeled as such throughout.
-- Emulators are not used. The Android emulator has no usable BLE radio.
+  record of observed behavior. The macOS peripheral *does* exercise several
+  CoreBluetooth paths that the table previously marked `spec` — those rows
+  are labeled as such.
+- Emulators are not used for BLE. The Android emulator has no usable radio.
 - BLE peripheral capability is a property of the chipset and OEM firmware, not
-  of the OS version. Device roles were assigned after probing for it.
+  of the OS version. It is irrelevant to this build: nothing on Android hosts
+  a GATT server.
 
 ## Reading order
 
@@ -154,3 +168,6 @@ Stated as a boundary rather than left implicit, because an unqualified claim of
 | [04-hazard-analysis.md](04-hazard-analysis.md) | What can hurt someone, and what specifically prevents it? |
 | [05-parity-contract.md](05-parity-contract.md) | How do Android and iOS stay behaviorally identical? |
 | [07-architecture.md](07-architecture.md) | How is the app structured, and why that way? |
+| [08-harness.md](08-harness.md) | What is the Mac-to-JVM socket, and why is it not the product protocol? |
+| [09-device-verification.md](09-device-verification.md) | What remains when a radio is attached? |
+| [10-demo-storyboard.md](10-demo-storyboard.md) | What does the 90-second recording show? |

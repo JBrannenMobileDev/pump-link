@@ -32,7 +32,7 @@ to any platform API. These are the assertions the scenario table makes.
 
 | ID | Required observable behavior |
 | --- | --- |
-| OB-01 | The controller identifies the pump by the logical device identity carried in its advertisement, and reconnects to it after any change of platform-level handle. |
+| OB-01 | The controller identifies the pump by the logical device identity in the `STATUS` characteristic, confirming any identity carried in the advertisement, and reconnects to it after any change of platform-level handle. |
 | OB-02 | No application-layer message is transmitted before notifications on `RSP` are confirmed enabled. |
 | OB-03 | The framing layer fragments against the actual negotiated MTU and never against an assumed one. |
 | OB-04 | Session establishment occurs after the link is encrypted and before any operational command. |
@@ -64,12 +64,15 @@ Mint feature list includes that no phone is required during a patch change, whic
 means the phone can be absent across a hardware event and must re-establish
 afterwards without user intervention.
 
-**Contract.** Identity is defined at the protocol layer. The pump advertises a
-16-byte logical device identity in manufacturer-specific data
+**Contract.** Identity is defined at the protocol layer
 ([02-protocol.md](02-protocol.md#advertising-and-logical-identity)). Both
-platforms scan filtered on the service UUID, read the logical identity from the
-advertisement, and match on it. Platform handles are treated as caches that may
-be invalidated at any time, never as identity. (OB-01)
+platforms scan filtered on the service UUID. When the advertisement carries the
+16-byte logical identity in manufacturer-specific data, that value is used as a
+pre-connect filter. Whether or not it was present, identity is confirmed by
+reading `STATUS` after the link is encrypted and before session establishment.
+A mismatch disconnects; matching on a platform handle is never sufficient.
+Platform handles are treated as caches that may be invalidated at any time,
+never as identity. (OB-01)
 
 ### D-02 — MTU negotiation
 
@@ -227,6 +230,54 @@ platforms behave identically is worth more than the concurrency iOS would
 permit, and a shared queue means the scenario table's timing assumptions hold in
 both places.
 
+That queue is not enough. `Transport.receive()` is a single-consumer channel,
+and `Session` holds one reassembler. Two concurrent L3 transactions therefore
+interleave *fragments* into one buffer and corrupt both exchanges —
+serialization of GATT writes does not serialize "send this request and wait
+for the PDU that answers it." L3 transactions are serialized through a
+second, single-consumer queue that owns the session. A status-poll tick that
+finds that queue non-empty is dropped rather than queued, so polls cannot
+accumulate behind a bolus.
+
+### D-10 — Advertising payload
+
+| | Android | iOS / macOS |
+| --- | --- | --- |
+| What you can put in an advertisement | Flags, local name, service UUIDs, manufacturer-specific data. A 128-bit UUID is usually placed in the scan response so the 31-byte payload has room for identity. | `CBPeripheralManager.startAdvertising` accepts only `CBAdvertisementDataLocalNameKey` and `CBAdvertisementDataServiceUUIDsKey`. Any other key is an error. Foreground budget is 28 bytes; a 128-bit UUID leaves roughly ten. |
+| Backgrounded peripheral | Continues to advertise the configured payload while a foreground service keeps the process alive. | Service UUIDs move to Apple's overflow area, discoverable only by an Apple central scanning for those UUIDs. An Android central cannot find a backgrounded Apple peripheral. |
+
+The product design puts the 16-byte logical identity in manufacturer data. That
+is correct for a real embedded pump. It is inexpressible on an Apple-hosted
+peripheral, and the leftover local-name budget is too small to smuggle the
+identity through. This is a property of the harness, not a reason to drop
+manufacturer data from the spec.
+
+**Contract.** Advertisement-borne identity is a pre-connect optimization.
+Normative identity is the `STATUS` read. An Apple-hosted harness advertises the
+service UUID (and a short local name) and keeps the peripheral app in the
+foreground so the UUID stays in the primary advertisement. Controllers treat a
+missing advertisement identity as "not yet confirmed," never as "not the paired
+device." (OB-01)
+
+## Harness deviations
+
+The rows above describe two product platforms talking to a real pump. The
+implementation in this repository talks to a **test harness**: a macOS
+`CBPeripheralManager` that forwards characteristic bytes to the JVM `PumpCore`
+over a length-prefixed TCP socket. That socket is not part of the product
+protocol. Its message types, framing, and port are specified in
+[08-harness.md](08-harness.md) so that a reviewer does not mistake them for
+wire format.
+
+Deviations the harness introduces, and no others:
+
+| Deviation | Why | What stays true |
+| --- | --- | --- |
+| No manufacturer-specific data in the advertisement | CoreBluetooth will not accept the key | Identity is confirmed via `STATUS` |
+| Peripheral must stay in the foreground | Overflow-area advertisements are invisible to Android | Demo and tests run with the Mac app on-screen |
+| `PumpCore` is reached over localhost TCP, not a microcontroller | The decision logic has to stay single-sourced and JVM-testable | L1–L4, the record store, and fault injection are unchanged |
+| Bonding is whatever the two host stacks do | Neither end is a dedicated BLE controller | All three characteristics still require encryption |
+
 ## Part 3 — How parity is enforced
 
 A contract nobody checks is a wish. The mechanism is a single scenario table,
@@ -262,18 +313,30 @@ API, which is what makes one table able to drive all three.
 | SC-18 | Reconnect after simulated patch change | OB-01 | yes | yes | spec |
 | SC-19 | Replay of a captured PDU into a new session | OB-04 | yes | yes | spec |
 | SC-20 | Record store reset while a command is outstanding | OB-07 | yes | yes | spec |
+| SC-21 | Late or duplicate response bound to the wrong command | OB-06, OB-10 | yes | yes | spec |
+| SC-22 | Ready-state status poll: stale after one miss, recover after three | OB-07 | yes | yes | spec |
+| SC-23 | Suspended link clears once reconcile reports nothing unresolved | OB-07 | yes | yes | spec |
+| SC-24 | Indeterminate keeps Suspended across repeated reconciles until acknowledged | OB-07 | yes | yes | spec |
+| SC-25 | Drop next RSP poisons the command: every retry of the same Seq fails; a later query settles | OB-07, OB-08 | yes | yes | spec |
+| SC-26 | `BOLUS_RSP` `ABORTED` / `IN_PROGRESS` is not treated as `COMPLETED` | OB-07 | yes | yes | spec |
 
-Seventeen of twenty rows run on the JVM in CI on every push. Three require a
+Twenty-three of twenty-six rows run on the JVM in CI on every push. Three require a
 device because they are about process lifecycle and platform service caching,
 which is precisely the area where the platforms differ most and where a shared
 table earns the most.
 
-**The iOS column says `spec`, not `pass`.** No iOS implementation was built here.
-The column states what the table would assert, and its value is that the
-assertions are already written in platform-neutral terms, so an iOS
-implementation has a definition of done rather than an invitation to reinterpret
-the requirements. Marking it `pass` would be the easy thing to do and would make
-the entire document untrustworthy.
+**The iOS-as-controller column says `spec`, not `pass`.** No iOS central was
+built here. The column states what the table would assert, and its value is
+that the assertions are already written in platform-neutral terms, so an iOS
+implementation has a definition of done rather than an invitation to
+reinterpret the requirements. Marking it `pass` would be the easy thing to do
+and would make the entire document untrustworthy.
+
+The macOS peripheral is a different claim. It exercises
+`maximumUpdateValueLength(for:)`, `peripheralManagerIsReady(toUpdateSubscribers:)`,
+and `didSubscribeTo` — the three CoreBluetooth paths that D-02, D-03, and D-09
+previously could only describe. Those are harness observations, not an iOS
+controller implementation, and they do not flip the iOS column to `pass`.
 
 ## What this does not cover
 

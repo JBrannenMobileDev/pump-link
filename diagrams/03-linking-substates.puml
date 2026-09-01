@@ -5,16 +5,16 @@ title Linking, refined
 
 state Linking {
   [*]         --> Scanning
-  Scanning    --> Connecting  : ScanMatch /\nlogical device id
+  Scanning    --> Connecting  : ScanMatch /\nidentity when present
   Connecting  --> Bonding     : Connected
   Bonding     --> Discovering : Bonded
   Discovering --> Configuring : ServicesDiscovered
   Configuring --> Subscribed  : MtuSettled and\nCccdConfirmed
   Discovering --> Scanning    : ServiceChanged /\nrediscover
-  Subscribed  --> [*]
+  Subscribed  --> [*] : STATUS identity\nmatches
 }
 
-Linking --> Authenticating : begin session
+Linking --> Authenticating : StatusRead match
 
 note right of Linking
   Every substate has a timeout.
@@ -26,9 +26,9 @@ end note
 note bottom of Linking
   Subscribed means the transport is usable
   and notifications are confirmed enabled.
-  No L3 traffic is permitted before it,
-  which is what makes hazard H-11
-  unreachable rather than merely avoided.
+  STATUS is then read for identity;
+  Authenticating is unreachable until
+  it matches. No L3 traffic before that.
 end note
 
 @enduml

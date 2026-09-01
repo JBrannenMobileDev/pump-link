@@ -58,6 +58,12 @@ Distinguishing it from `Recovering` matters: `Recovering` is "we cannot talk to
 the pump," `Suspended` is "we are talking to the pump and it told us something we
 must not act through."
 
+`GET_STATUS` cannot resolve a command. It carries reservoir, battery,
+`deliveryActive`, `recordEpoch`, and `storeInstanceId`. The operation that
+answers "what happened to `CommandId` N" is `QUERY_COMMAND_OUTCOME_REQ`, which
+is what `BeginReconcile` already sends. `Suspended` therefore leaves by
+re-entering `Reconciling`, not by polling status.
+
 ## States
 
 | State | Meaning | Dosing |
@@ -85,28 +91,50 @@ must not act through."
 | `ScanMatch(logicalDeviceId)` | Scanner |
 | `ScanTimeout` | Timer |
 | `Connected`, `ConnectFailed(code)` | Platform GATT |
-| `Disconnected(code)` | Platform GATT |
+| `Disconnected(code)` | Platform GATT, or the adapter itself |
 | `Bonded`, `BondFailed`, `BondLost` | Platform bonding |
 | `ServicesDiscovered`, `DiscoveryFailed(code)` | Platform GATT |
 | `ServiceChanged` | Peripheral indication |
 | `MtuSettled(mtu)` | Platform GATT |
 | `CccdConfirmed` | Platform GATT |
+| `StatusRead(logicalDeviceId, protocolVersion, recordEpoch)` | `STATUS` characteristic |
 | `AuthSucceeded`, `AuthFailed(reason)` | `:protocol` L4 |
 | `ReconcileDone(unresolvedCount)` | `:domain` |
-| `UserVerifiedAtPump` | Application |
+| `UserVerifiedAtPump` | Application — a human closed an Indeterminate row against the pump |
+| `ReconcileRequested` | Application — the 5 s tick, or an explicit re-check. Not a human attestation. |
 | `Timeout(state)` | Timer |
 
-`ScanMatch` carries the **logical device identity** from the advertisement, not
-a platform handle. Matching on a MAC address would work on Android and be
-impossible on iOS; see [02-protocol.md](02-protocol.md#advertising-and-logical-identity).
+`Disconnected` is also produced when the phone's Bluetooth adapter is powered
+down. Several stacks, including the one on this project's A32, do not reliably
+deliver a GATT `onConnectionStateChange` for that case: the client handle
+stays "connected" and a write is accepted locally against a radio that is
+already off. The adapter broadcast is the signal that is actually delivered,
+and Ready must not survive it. A new delivery command is not journaled while
+the adapter is off — journal-before-transmit is for an ambiguous radio, not
+for one the platform has already declared gone.
+
+`ScanMatch` carries the **logical device identity** from the advertisement when
+the advertisement has one, and `null` when it does not. Matching on a MAC
+address would work on Android and be impossible on iOS; see
+[02-protocol.md](02-protocol.md#advertising-and-logical-identity). The Mac
+harness cannot put the identity in manufacturer data at all
+([05-parity-contract.md](05-parity-contract.md#d-10--advertising-payload)),
+which is why the field is optional and why `StatusRead` is not.
+
+`StatusRead` is the first L0 read after `Subscribed`. It is not an L3
+`GET_STATUS_REQ`. Authenticating is unreachable until the identity in that
+value equals the paired one.
 
 ## Guards
 
 | Transition | Guard |
 | --- | --- |
-| `Scanning → Connecting` | Advertised logical device identity equals the paired one |
+| `Scanning → Connecting` | Advertised logical device identity equals the paired one, **when present**. If the advertisement carries no identity, the service UUID is sufficient to connect; confirmation waits for `StatusRead`. |
+| `Subscribed → Authenticating` | `StatusRead` logical device identity equals the paired one |
+| `Subscribed → Recovering` | `StatusRead` identity is missing or does not match |
 | `Reconciling → Ready` | `unresolvedCount == 0` |
 | `Reconciling → Suspended` | `unresolvedCount > 0` |
+| `Suspended → Reconciling` | `UserVerifiedAtPump` or `ReconcileRequested` |
 | `Recovering → Scanning` | `attempts < maxAttempts` and backoff elapsed |
 | `Recovering → Failed` | `attempts >= maxAttempts` |
 | `Authenticating → Unpaired` | Failure reason is bond loss or key mismatch, not timeout |
@@ -120,12 +148,47 @@ impossible on iOS; see [02-protocol.md](02-protocol.md#advertising-and-logical-i
 | `Bonding` | 30 s | `Recovering` |
 | `Discovering` | 10 s | `Recovering` |
 | `Configuring` | 5 s | `Recovering` |
+| `Subscribed` | 5 s | `Recovering` — `STATUS` read did not complete |
 | `Authenticating` | 5 s (`T_AUTH`) | `Recovering` |
 | `Reconciling` | 10 s (`T_RESOLVE`) | `Suspended` |
 
 `Reconciling` expiring goes to `Suspended`, not `Recovering`. The link may be
 fine; what is not fine is proceeding. Sending it to `Recovering` would drop a
-working connection and retry into the same wall.
+working connection and retry into the same wall. `Suspended` is not a dead
+end: the same 5 s tick, or an explicit re-check, sends `ReconcileRequested`
+and re-enters `Reconciling` with a fresh `T_RESOLVE`.
+
+## Ready-state status poll
+
+The 5 s tick is shared across the sessioned states and does three different
+things:
+
+| State | Tick |
+| --- | --- |
+| `Ready` | `GET_STATUS_REQ`, one attempt |
+| `Suspended` | `ReconcileRequested` — re-run `QUERY_COMMAND_OUTCOME` for every in-flight command |
+| `Reconciling` | no-op; a reconcile is already running |
+
+The first vitals snapshot is taken on entry to `Ready`, which has no timeout,
+so a slow status read cannot expire `T_AUTH` or `T_RESOLVE`. The poll is what
+keeps reservoir, battery, `deliveryActive`, and `storeInstanceId` from being
+that snapshot forever. Authentication dispatches `AuthSucceeded` after its
+transaction closes; the status read is not inside it.
+
+A tick that finds an L3 transaction already in flight is dropped, not queued.
+That is the "skip during delivery" rule, and it is a property of the
+transaction queue rather than a special case: `BOLUS_PROGRESS_IND` already
+reports progress while a bolus is running, and a poll piled up behind one
+would fire a burst of stale reads. Ticks are also skipped while the adapter
+is off. Each poll uses a single send attempt, so a failed tick is bounded by
+`T_RESP`.
+
+A failed poll marks vitals stale immediately. Dosing stays allowed: the pump
+is still the enforcement point (H-13). Three consecutive failures dispatch
+`Disconnected(TransientLink)`, which is the same path the adapter-off
+receiver already uses, and leave `Ready` for `Recovering`. A later success
+clears the failure count and the stale flag. Worst-case detection is roughly
+21 s (three 5 s gaps and three 2 s timeouts).
 
 ## Error classes
 
@@ -153,6 +216,44 @@ means the two sides disagree about session state, and tearing down a healthy
 radio link to fix a software disagreement is both slower and less likely to work
 than resetting the session over the link that is already up.
 
+`Recovering`, `Failed`, `Unpaired`, and `StopRequested` emit `ResetSession`.
+`Seq` starts at 0 on the next establishment, and the inbound window on both
+sides must start there too. A reconnect that leaves `lastAccepted` in place
+drops the peer's `Seq` 0 as a replay. A new `AUTH_CHALLENGE_REQ` is what
+resets the pump; the controller resets when the radio is released and again
+at the start of `authenticateAsController`.
+
+## Transport watchdog
+
+The link machine's timeouts (`CONNECT_MS` 10 s, `T_AUTH_MS` 5 s) are the
+right size for a state, and the wrong size for a single GATT call. Android
+permits one outstanding GATT operation. If that call is initiated and the
+callback never arrives — a missing `onDescriptorWrite` is the case that
+found this — a queue that can only be released by the callback is held
+forever. Later `connectGatt` calls enqueue and never start. The UI sits
+on Connecting against a radio that was never asked.
+
+The platform transport therefore carries its own per-op watchdog, 3 s,
+beneath the state timeouts. The gate is released by exactly one of: the
+matching callback, a failed initiation (`writeDescriptor` returning
+`false`), a thrown start, the watchdog, or a reset on `close`. Never by
+nothing. A stall emits `Disconnected`, which every leaf state already
+routes into `Recovering`, rather than `DiscoveryFailed`, which only
+`Discovering` acts on.
+
+A peripheral that accepts an operation and never calls back must not be
+able to stall the queue. The state machine still owns the retry budget;
+the transport only guarantees that a dead call cannot prevent the next
+one.
+
+The next GATT call is posted off the binder callback. Issuing
+`writeDescriptor` synchronously from `onMtuChanged` is a known Samsung
+failure: the CCCD write is accepted (`initiated=true`) and
+`onDescriptorWrite` never arrives, so Configuring sits on "Negotiating
+MTU" until the 5 s state timeout. The watchdog is armed before `start`
+returns for the same reason — a callback that beats the return used to
+cancel the next op's watchdog.
+
 ## What this state machine is not
 
 It is not `UiState`, and the two are not merged.
@@ -160,11 +261,39 @@ It is not `UiState`, and the two are not merged.
 `UiState` is a projection of this state plus the journal, the pump's last known
 status, and whatever the user is currently typing. It has states this machine
 does not, such as "user is entering a dose," and it collapses states this
-machine distinguishes — `Connecting`, `Bonding`, `Discovering`, and `Configuring`
-are all one spinner.
+machine distinguishes — for the purpose of deciding whether a dose may be sent,
+`Connecting`, `Bonding`, `Discovering`, and `Configuring` are one value.
 
 Conflating them is the standard BLE application mistake. It produces a UI state
 enum that grows a case every time the transport learns a new failure mode, and a
 transport that cannot be tested without a UI. The projection is a pure function
-in `:domain`, tested by feeding it link states and asserting the rendered result;
-see [07-architecture.md](07-architecture.md).
+in `:presentation`, tested by feeding it link states and asserting the rendered
+result; see [07-architecture.md](07-architecture.md).
+
+### The collapse is a dosing rule, not a rendering rule
+
+An earlier revision of this document said those four substates were "all one
+spinner." That overstated it, and the overstatement cost real debugging time: a
+bond waiting on an unanswered system pairing dialog and a stalled MTU
+negotiation both presented as an undifferentiated `Linking`, with nothing on
+screen to tell them apart.
+
+The rule that matters is narrower. **`LinkStatus`, the value dosing consults,
+collapses the substates and must keep collapsing them** — the predicate for
+"may I send a delivery command" does not acquire a case when the transport
+learns a new failure mode. Nothing about that requires the substates to be
+invisible.
+
+A diagnostic surface may therefore render `LinkStep` — the eight substates
+above, in order, with the outstanding one named alongside its timeout from the
+table in this document. Two constraints keep it honest:
+
+- It is derived by a second, independent mapping (`LinkStatusMapper.progress`)
+  from the same `LinkState`. It is not derived from `LinkStatus`, and
+  `LinkStatus` is not derived from it.
+- It cannot enable dosing. `BolusUiState` still sees one `DosingDisabled(link)`
+  case, so no amount of detail on the link screen can widen the set of states a
+  bolus is reachable from.
+
+`LinkStep` and `LinkFault` live in `:domain` as protocol-free mirrors, because
+`:presentation` may not import `:protocol` and the build enforces it.

@@ -46,6 +46,19 @@ state advanced while it was absent, before paying for a full session. Deliberate
 tradeoff: this leaks a coarse activity signal to a bonded peer, accepted here
 because the alternative is a full session establishment on every wake.
 
+`STATUS` characteristic value, 21 octets:
+
+| Offset | Size | Field |
+| --- | --- | --- |
+| 0 | 1 | `protocolVersion` |
+| 1 | 16 | `logicalDeviceId` |
+| 17 | 4 | `recordEpoch` |
+
+This is not `GET_STATUS_RSP`. That is an L3 operational snapshot (reservoir,
+battery, actuation flag, epoch, store instance) and requires a session. `STATUS`
+answers "am I talking to the pump I paired, and has anything happened since I
+last looked" before any application PDU is sent.
+
 ### Advertising and logical identity
 
 A 128-bit service UUID consumes 16 of the 31 octets of advertising payload. The
@@ -53,6 +66,24 @@ service UUID therefore goes in the **scan response**, and the advertising
 payload carries flags, a short local name, and manufacturer-specific data
 containing the pump's **logical device identity** — a 16-byte value that is
 stable across a disposable patch change and across both platforms.
+
+Advertisement-borne identity is a **pre-connect optimization**. It lets a
+controller ignore a nearby pump that is not the paired one without paying for a
+GATT connection. It is not the identity check the safety argument depends on.
+The normative confirmation is the `STATUS` read above, completed after the link
+is encrypted and before session establishment. A controller that matches on the
+advertisement and then skips `STATUS` has treated a cache as a proof.
+
+This split is load-bearing for more than the Mac harness. A real embedded pump
+can put the identity in manufacturer data; an Apple-hosted peripheral cannot.
+`CBPeripheralManager.startAdvertising` accepts only
+`CBAdvertisementDataLocalNameKey` and `CBAdvertisementDataServiceUUIDsKey` and
+errors on anything else. The 28-byte foreground budget leaves roughly ten bytes
+after a 128-bit service UUID — too few for a 16-byte identity in the local name,
+and the overflow area used when an iOS/macOS peripheral is backgrounded is
+invisible to an Android central. Those are harness deviations, recorded in
+[05-parity-contract.md](05-parity-contract.md#d-10--advertising-payload), not
+changes to the product wire format.
 
 This is not cosmetic. iOS never exposes a peripheral's Bluetooth address and
 issues a per-app opaque `CBPeripheral` identifier; Android exposes an address
@@ -179,6 +210,31 @@ equals `lastAccepted` and whose content is byte-identical is treated as a
 retransmission: the cached response is re-sent and the operation is **not**
 re-executed.
 
+The inbound window applies in both directions. The pump uses it to suppress
+duplicate commands; the controller uses it to drop a duplicate or replayed
+response rather than attribute it to a later request. The controller has no
+response cache to re-send, so both `Reject` and `Retransmit` are a drop.
+
+`Seq` alone is not a nonce: it is 8 bits and repeats every 255 values (`0xFF`
+is reserved as "no `AckSeq`"). Uniqueness comes from the pair of session key
+and `Seq`. A wrap-around collision would also have to land inside the
+acceptance window after 255 intervening PDUs, which `T_RESP` makes
+unreachable.
+
+### Response binding
+
+A receiver matches a response to the request it sent by `AckSeq` (the request
+`Seq`) and, where the request carried a non-zero `CommandId`, by `CommandId`.
+The `RESP` flag must be set. What cannot be matched is discarded and the
+receiver keeps waiting inside `T_RESP`.
+
+A `NAK` whose `AckSeq` is `0xFF` (`ACK_SEQ_NONE`) is accepted: a decode
+failure cannot know the seq it is answering. Any other unmatched `NAK` is
+discarded.
+
+`BOLUS_PROGRESS_IND` is unsolicited and is skipped by the matcher. A retry
+re-sends a byte-identical PDU, so the expected `AckSeq` does not change.
+
 ## L3 — Operations
 
 ### Opcodes
@@ -289,8 +345,25 @@ Each record holds:
 | `state` | 1 | `ACCEPTED`, `IN_PROGRESS`, `COMPLETED`, `ABORTED` |
 | `requestedMilliunits` | 2 | As requested |
 | `deliveredMilliunits` | 2 | Actually actuated, updated during delivery |
-| `abortReason` | 1 | Valid when `state = ABORTED` |
+| `abortReason` | 1 | Valid when `state = ABORTED`. Codes below. |
 | `startedAt`, `endedAt` | 4 each | Pump uptime ticks |
+
+`abortReason` codes:
+
+| Code | Meaning |
+| --- | --- |
+| `0x01` | Operator cancelled |
+| `0x02` | Requested dose is not positive |
+| `0x03` | Exceeds the pump's maximum bolus |
+| `0x04` | Not on the pump's increment |
+| `0x05` | Insufficient reservoir |
+| `0x06` | Exceeds the pump's maximum duration |
+| `0x07` | A delivery is already active |
+| `0x08` | Occlusion |
+
+The controller maps these onto a smaller domain set (`UserCancelled`,
+`Reservoir`, `Occlusion`, `PumpRejected`). An `ABORTED` record is never a
+successful delivery, including when `deliveredMilliunits` is zero.
 
 ### `BOLUS_REQ` handling
 

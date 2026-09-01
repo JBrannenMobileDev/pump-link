@@ -13,6 +13,9 @@ decision, its consequences including the bad ones, and what would change it.
 
 Arrows are compile-time dependencies. `:domain` depends on nothing, which is the
 property that matters — everything else is arranged to preserve it.
+`:presentation` depends only on `:domain`: the MVI types and the
+connection-state projection live there so detekt's sealed-`when` rule can
+actually see them. `:app` is a Compose shell over that module.
 
 ## ADR-01 — Clean architecture, with `:domain` independent of `:protocol`
 
@@ -65,26 +68,56 @@ sealed interface BolusIntent {
     data class DoseEntered(val milliunits: Int) : BolusIntent
     data object Confirmed : BolusIntent
     data object Cancelled : BolusIntent
+    data class Acknowledged(val commandId: DomainCommandId) : BolusIntent
     data object ReissueConfirmed : BolusIntent
     data object ReissueDeclined : BolusIntent
     data object PumpVerifiedByUser : BolusIntent
+    data object RecheckRequested : BolusIntent
 }
 
 sealed interface BolusUiState {
     data class Entering(val draft: Draft, val pump: PumpSummary) : BolusUiState
     data class Confirming(val dose: Dose, val pump: PumpSummary) : BolusUiState
-    data class Delivering(val delivered: Dose, val requested: Dose) : BolusUiState
-    data class Delivered(val delivered: Dose) : BolusUiState
-    data class PartiallyDelivered(val delivered: Dose, val reason: AbortReason) : BolusUiState
-    data class AwaitingReissue(val dose: Dose, val elapsed: Duration) : BolusUiState
-    data class Resolving(val dose: Dose) : BolusUiState
-    data class Blocked(val dose: Dose) : BolusUiState
-    data class Indeterminate(val dose: Dose) : BolusUiState
+    data class Delivering(val delivered: Dose, val requested: Dose, val commandId: DomainCommandId) : BolusUiState
+    data class Delivered(
+        val delivered: Dose,
+        val commandId: DomainCommandId,
+        val recovered: Boolean = false,
+    ) : BolusUiState
+    data class PartiallyDelivered(
+        val delivered: Dose,
+        val reason: AbortReason,
+        val commandId: DomainCommandId,
+        val recovered: Boolean = false,
+    ) : BolusUiState
+    data class AwaitingReissue(val dose: Dose, val elapsed: Duration, val commandId: DomainCommandId) : BolusUiState
+    data class Resolving(val dose: Dose, val commandId: DomainCommandId) : BolusUiState
+    data class Blocked(val dose: Dose, val commandId: DomainCommandId?) : BolusUiState
+    data class Indeterminate(val dose: Dose, val commandId: DomainCommandId) : BolusUiState
     data class DosingDisabled(val link: LinkStatus) : BolusUiState
 }
 
-fun reduce(state: BolusUiState, intent: BolusIntent): BolusUiState
+/** Local, ephemeral UI position. See ADR-07. */
+data class Stage(
+    val step: Step = Step.Editing,
+    val acknowledged: DomainCommandId? = null,
+)
+
+enum class Step { Editing, Confirming }
+
+fun reduce(stage: Stage, intent: BolusIntent): Stage
 ```
+
+Every state that names a single command carries its `CommandId`. That is not
+decoration: `Acknowledged` has to identify what it is retiring, and a result
+arriving while a card is open must not be dismissible by a tap aimed at the
+previous one.
+
+These types live in `:presentation`, a pure JVM module. They do not live in
+`:app`. detekt 1.23.8 only creates type-resolution tasks for plain JVM modules,
+so `ElseCaseInsteadOfExhaustiveWhen` cannot run under AGP 9. Putting the
+reducer in `:app` would make ADR-02 a convention again. Putting it in
+`:presentation` makes the convention a build failure.
 
 **Why it earns its cost here.** Every transition is a pure function testable
 without a radio, and the compiler refuses to build a reducer that adds a state or
@@ -150,8 +183,8 @@ without resolving it is the point.
 ## ADR-04 — Two state machines, kept separate
 
 **Context.** There is a connection state machine in `:protocol` and a UI state
-hierarchy in `:app`. They are correlated. Merging them removes an apparent
-duplication.
+hierarchy in `:presentation`. They are correlated. Merging them removes an
+apparent duplication.
 
 **Decision.** They stay separate. `BolusUiState` is a **projection**:
 
@@ -161,10 +194,15 @@ fun project(
     journal: JournalSnapshot,
     pump: PumpSummary?,
     draft: Draft?,
+    stage: Stage = Stage(),
+    resolving: DomainCommandId? = null,
 ): BolusUiState
 ```
 
-Pure, in `:domain`, tested by feeding it combinations and asserting the result.
+Pure, in `:presentation`, tested by feeding it combinations and asserting the
+result. `:domain` owns `LinkStatus` (a coarse, protocol-free view of the link);
+`:data` maps `:protocol` `LinkState` onto it. `:presentation` never imports
+`:protocol`.
 
 **Why.** The two have different alphabets, in both directions.
 
@@ -187,10 +225,10 @@ enabled dose button, and that is one assertion rather than an audit of the UI.
 
 ## ADR-05 — Kotlin Multiplatform considered and not adopted
 
-**Context.** `:protocol`, `:domain`, and `:simulator` are pure Kotlin with no
-Android dependencies. Converting them to KMP targets would let an iOS app consume
-the identical framing, session, state machine, and business logic, which is the
-strongest possible answer to the parity problem in
+**Context.** `:protocol`, `:domain`, `:presentation`, and `:simulator` are
+pure Kotlin with no Android dependencies. Converting them to KMP targets would
+let an iOS app consume the identical framing, session, state machine, and
+business logic, which is the strongest possible answer to the parity problem in
 [05-parity-contract.md](05-parity-contract.md).
 
 **Decision.** Structure for it. Do not build it.
@@ -203,10 +241,11 @@ build.
 **Why not build it.** It would consume the majority of the time available and
 demonstrate KMP toolchain configuration, which is not the skill this project
 exists to show. Worse, it would weaken the parity document: if the protocol layer
-is literally shared, the eight platform divergences that make parity hard do not
+is literally shared, the ten platform divergences that make parity hard do not
 disappear — they move into the thin platform layer where they are easier to
 overlook. The divergences are in bonding order, notification enablement, device
-identity, and background execution, and no amount of shared Kotlin removes them.
+identity, advertising payload, and background execution, and no amount of
+shared Kotlin removes them.
 
 Sharing the protocol layer is a real answer to part of the problem. Believing it
 is the whole answer is the trap.
@@ -220,7 +259,7 @@ which is a change-control question at least as much as a technical one.
 | Hazard | Enforced in | Android needed to test? |
 | --- | --- | --- |
 | H-01, H-04, H-13 | `:simulator` record store and limits | No |
-| H-02, H-03, H-07, H-14 | `:domain` use cases and projection | No |
+| H-02, H-03, H-07, H-14 | `:domain` use cases, `:presentation` projection | No |
 | H-06, H-08, H-09, H-10 | `:protocol` codec and session | No |
 | H-05, H-11 | `:protocol` state machine, `:data` platform mapping | Partly |
 | H-12 | `:data` journal and foreground service | Yes |
@@ -230,15 +269,196 @@ CI on every push, in seconds, with no device attached. That is the practical
 payoff of the module boundaries, and it is the argument to make when someone
 proposes collapsing them.
 
+## ADR-06 — The safety journal is an append-only file with `fsync`, not Room
+
+**Context.** The obvious store for a command journal on Android is Room. It is
+typed, migratable, and already in every Android codebase. The journal exists
+to survive process death between "I am about to transmit `CommandId` N" and
+"I know what happened to N" (REQ-S-02, hazard H-12). That is a durability
+requirement, not a query requirement.
+
+Room's default SQLite connection uses `synchronous=NORMAL`. A `COMMIT` returns
+when the rollback journal is written, not when the WAL and the database file
+have hit stable storage. A power loss or a kernel kill in that window can
+leave the journal without the row the safety argument depends on. SQLite can
+be opened at `synchronous=FULL`, but that is not Room's default, it is easy
+to lose on a connection-pool change, and it is still a B-tree with a WAL
+whose recovery semantics are more than the journal needs.
+
+**Decision.** The journal is an append-only file. Each entry is a length-
+prefixed record. After every append the implementation calls `FileDescriptor.sync()`
+(`fsync`) and does not return success until that call returns. There is no
+in-place update: a state change is a new record for the same `CommandId`, and
+the reader takes the latest. Rotation is out of scope for the lifetime of
+this project.
+
+**Consequences.** No SQL, no migrations, no Room dependency in `:data`. The
+file is auditable with `hexdump`. The durability guarantee is one syscall,
+named, rather than a PRAGMA buried in a helper. The cost is that we do not
+get Room's query API or its test fakes; the journal is small and is always
+read in full.
+
+**What would change this.** A journal that must be queried by something other
+than "give me the latest record per `CommandId`," or a storage layer already
+configured at `synchronous=FULL` and covered by a durability test that pulls
+power. Neither is true here.
+
+## ADR-07 — Ephemeral UI position is separated from derived truth
+
+**Context.** `BolusUiState` is a projection (ADR-04), but not everything on the
+screen can be derived from the journal. "The operator is looking at a
+confirmation prompt" and "the operator has dismissed a result card" are facts
+about the UI, not about the pump. An early implementation had `reduce` folding
+`BolusUiState` directly while the ViewModel built its state purely from
+`project`, so the reducer was unreachable: `Confirming` was never produced, and
+the confirmation step did not exist at runtime.
+
+**Decision.** Two functions with different jobs, composed in that order.
+
+`project` owns everything safety-relevant and is derived from the journal, the
+link, and the pump. `reduce` owns a small `Stage` — a dose-entry `step` and
+an optional dismissed `acknowledged` CommandId — and nothing else. `Stage` is
+consulted **only** when the projection has already concluded that the screen
+is at `Entering` or at a settled result. Every hazard state ignores it.
+
+The consequence worth stating plainly: no sequence of intents can produce a UI
+that claims a delivery outcome the pump did not report, because `reduce` has no
+access to the journal and cannot construct a `BolusUiState` at all.
+
+**Where an acknowledgement lives is a safety question.** The split is on
+survivability, not convenience:
+
+| Retiring | Held in | Survives process death | Why |
+| --- | --- | --- | --- |
+| A successful or partial result | `Stage.acknowledged` | No | Re-showing a delivered dose after a restart is harmless |
+| An `Indeterminate` outcome | `JournalState.Acknowledged` | Yes | A hazard that a restart could clear is not a control |
+| A declined reissue | `JournalState.Acknowledged` | Yes | "Do not deliver" is a decision, and re-prompting invites a second answer |
+
+ADR-03 already required that transient messages need an explicit
+acknowledgement intent to clear them. `BolusIntent.Acknowledged` is that intent;
+this ADR only decides where each kind of acknowledgement is stored.
+
+**Consequences.** One more concept than a single reducer, and a projection whose
+signature now carries `stage` and `resolving`. In exchange the reducer is live,
+tested code rather than decoration, and the durability of a hazard
+acknowledgement is a type-level property rather than a habit.
+
+### Correction: the journal fold
+
+ADR-06 states that "a state change is a new record for the same `CommandId`, and
+the reader takes the latest." The reader did not take the latest.
+`JournalSnapshot` filtered the whole log, so the `Pending` and `InFlight` records
+that `DeliverBolusUseCase` writes before transmission kept matching after the
+command resolved. One bolus pinned the screen to `Delivering` permanently, and a
+single `Indeterminate` record latched that state forever, which is also why the
+"I checked the pump" action could not clear it.
+
+`JournalSnapshot.current()` now folds the log to the latest record per
+`CommandId`, and `inFlight`, `indeterminate`, `awaitingReissue`, and
+`lastTerminal` all read the fold. This is a code fix, not a spec change — ADR-06
+already specified the intended behaviour.
+
+### Correction: dismissal and step are independent
+
+The original `Stage` was a single sealed value: `Editing`, `Confirming`, or
+`AckedDelivery(commandId)`. Acknowledging a result therefore *was* the stage,
+so the next intent that moved the step — `Confirmed` to review a new dose,
+`DoseEntered` to edit — discarded the dismissal. The Delivered card returned
+and the operator could not dose again.
+
+`Stage` is now two fields. `step` is the dose-entry position. `acknowledged`
+is the CommandId whose result card has been dismissed. Only
+`BolusIntent.Acknowledged` writes `acknowledged`. Every other intent writes
+only `step`. The two facts no longer overwrite each other.
+
+## ADR-08 — The operator surface and the diagnostic surface are separate
+
+**Context.** The first Compose shell put protocol internals on the dosing
+screen: `cmd 0x0002`, `store 0x…`, `awaiting BOLUS_RSP`, "journaled before
+it is transmitted." That is the right information for a reviewer tracing a
+session. It is the wrong information for the person who has to decide
+whether to press Deliver. A surface that mixes both audiences makes the
+critical task harder to read, and it hides that the author knows the
+difference.
+
+**Decision.** Two surfaces, one projection.
+
+The **operator surface** — the dosing card and the pinned action bar — is
+plain language. The card answers *what is happening*. The bar answers
+*what you can do*, always in the same place. Protocol identifiers, MTU,
+store instance, and opcode names do not appear there.
+
+The **diagnostic surface** is the existing link panel. It already existed
+to make "Linking" diagnosable. It now also carries the store instance and
+the most recent CommandId, which is where a reviewer looks when they want
+the wire.
+
+`actions(state: BolusUiState): List<BolusAction>` is a total function in
+`:presentation`. A new UI state that forgets to name its actions is a
+compile error, and the bar can be tested without Compose. `Delivering`
+and `Resolving` return an empty list; the bar then shows a status strip
+so emptiness never reads as a broken control. `DosingDisabled` returns
+`OpenLinkPanel`, so "open the link panel" is an action rather than a
+caption on a dead end.
+
+**Deferred, and named so they stay deferred rather than forgotten.**
+
+- Accessibility: TalkBack semantics, live regions on state change, a
+  merged dose readout, 48 dp targets on the preset chips, and a layout
+  that survives 200% font scale.
+- Critical-action slip resistance: Cancel and Deliver remain adjacent
+  and equal-weight. A later pass should separate them.
+
+**What would change this.** A reviewer who is also the only operator, and
+a decision that the demo is the protocol rather than the task. That is a
+different product.
+
+## ADR-09 — Recovery is journaled, and every UI state has a named scenario
+
+**Context.** A dropped `BOLUS_RSP` is not a failed delivery. The controller
+asks the pump and usually learns `COMPLETED`. The screen then showed the
+same Delivered card as the happy path, so a working query-then-decide
+looked like a successful first try. `prepare()` already writes Pending
+and InFlight on every send, so recovery cannot be inferred from those
+rows. Meanwhile, several `BolusUiState` values are hard to reach over the
+radio, which made the operator surface unreviewable except by fault
+injection that itself had holes.
+
+**Decision.** Two durable facts, one shared table.
+
+Before any post-failure query, the controller appends
+`JournalState.Resolving`. That is independently correct: a process death
+mid-query must say "we were asking", not "we transmitted and are waiting".
+`JournalSnapshot.wasRecovered(commandId)` is then true for the life of
+that CommandId, and `BolusUiState.Delivered` / `PartiallyDelivered` /
+`HistoryRow` carry a `recovered` flag so the operator card can say so.
+
+`BolusScenarios` in `:presentation` main is a named table of projection
+inputs plus the expected `BolusUiState` subclass. A JVM test asserts
+each row, and `classify()` is a total `when` so a new state that has no
+scenario will not compile. The debug-only `StateGalleryActivity` renders
+the same table through the real `BolusScreen`. Production code is not
+involved.
+
+**Consequences.** The journal grows by one row on every ambiguous
+response. That is cheap and the reason the log is append-only. The
+gallery is `app/src/debug/` only; a release build does not contain it.
+
+**What would change this.** A protocol-level "this reply is a recovery"
+flag, which would duplicate what the journal already knows, or a product
+decision that recovered and first-try deliveries should look identical.
+
 ## Conventions
 
 - Kotlin, coroutines, Gradle Kotlin DSL, version catalog
-- `compileSdk 36`, `targetSdk 34`, `minSdk 31` — rationale in
+- `compileSdk 37`, `targetSdk 37`, `minSdk 31` — `compileSdk` is 37 because
+  AndroidX 1.19 requires it; `targetSdk` matches it. Hardware verification is
+  API 33. Rationale in
   [00-overview.md](00-overview.md#verification-boundary)
 - ViewModel exposes `StateFlow` via `stateIn(WhileSubscribed(5_000))`
 - Compose collects with `collectAsStateWithLifecycle()`
 - Composables take `(uiState, onIntent)` and hold no ViewModel reference, so
   every state including the ones that are hard to reach is previewable
 - No `else` branches on `when` over sealed types
-- `:protocol`, `:domain`, and `:simulator` have no Android dependencies, checked
-  by the build rather than by review
+- `:protocol`, `:domain`, `:presentation`, and `:simulator` have no Android
+  dependencies, checked by the build rather than by review

@@ -4,27 +4,31 @@
 title Module structure and dependency direction
 
 package "Android" as androidLayer {
-  component ":app\n\nCompose, ViewModel,\nUiState, Intent, reducer" as app $phoneFill
-  component ":data\n\nBLE central, GATT server,\njournal persistence, foreground\nservice, platform error mapping" as data $phoneFill
+  component ":app\n\nCompose shell,\nViewModel" as app $phoneFill
+  component ":data\n\nBLE central, fsync\njournal, foreground\nservice, error mapping" as data $phoneFill
 }
 
 package "Pure Kotlin, JVM-testable" as pureLayer {
+  component ":presentation\n\nBolusUiState, Intent,\nreduce, link projection" as presentation $phoneFill
   component ":domain\n\nEntities, use cases,\nrepository and journal\ninterfaces" as domain $storeFill
   component ":protocol\n\nFraming, CRC, codec,\nsession, connection\nstate machine" as protocol $pumpFill
   component ":simulator\n\nPumpCore: record store,\ndedupe, limits,\nfault injection" as simulator $pumpFill
 }
 
-app       --> domain
-app       ..> data      : assembly only
-data      --> domain
-data      --> protocol
-data      --> simulator
-simulator --> protocol
+app            --> presentation
+app            --> domain
+app            ..> data           : assembly only
+presentation   --> domain
+data           --> domain
+data           --> protocol
+data           --> simulator
+simulator      --> protocol
 
 note bottom of domain
   :domain depends on nothing.
-  Everything else is arranged
-  to preserve that.
+  :presentation depends only
+  on :domain, so the reducer
+  is under detektMain.
 end note
 
 @enduml

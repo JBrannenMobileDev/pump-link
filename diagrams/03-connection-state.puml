@@ -21,6 +21,7 @@ state Active {
   Reconciling    --> Ready          : ReconcileDone\n[nothing unresolved]
   Reconciling    --> Suspended      : ReconcileDone\n[unresolved remain]\nor T_RESOLVE expired
   Suspended      --> Reconciling    : UserVerifiedAtPump
+  Suspended      --> Reconciling    : ReconcileRequested
 }
 
 Active --> Recovering : Disconnected / Timeout / GattFailure,\nfrom any substate

@@ -44,7 +44,7 @@ instead of guessing.
 | H-01 | A delivered bolus is delivered a second time. Hypoglycemia. | Catastrophic | Response lost after the pump accepted the command; controller retries as if it had never been sent | Client-generated `CommandId`; pump commits the delivery record before actuating; a repeat `CommandId` is answered from the record and never actuates (REQ-S-01, 03, 04, 08; invariants I-1, I-2) | `DropResponseAfterAcceptTest` asserts total actuated equals requested across an arbitrary number of retries |
 | H-02 | An ambiguous outcome is reported to the user as failure. The user doses again by another route. Hypoglycemia. | Catastrophic | Retry budget exhaustion treated as a negative result | Exhausted retries produce an unknown state, never a failure state; dosing is blocked until reconciled (REQ-S-07) | `AmbiguousOutcomeIsNotFailureTest` asserts the terminal state after retry exhaustion is `Resolving`, never `NotDelivered` |
 | H-03 | A bolus that never reached the pump is shown as delivered. The user omits a needed dose. Hyperglycemia, DKA. | Critical | Rendering delivery from the GATT write callback | Delivery is rendered only from a pump-confirmed record (REQ-S-05, invariant I-4) | `WriteCallbackIsNotDeliveryTest` asserts no UI state reaches `Delivered` on a write acknowledgement alone |
-| H-04 | An old command whose record has been evicted is treated as never delivered and reissued. Hypoglycemia. | Catastrophic | Finite record store wraps; absence of a record stops being evidence | `oldestRetainedCommandId` is returned with every outcome; absence resolves to `NEVER_SEEN` only inside the retention window, otherwise `EVICTED` and indeterminate | `EvictedIsNotNeverSeenTest` asserts an out-of-window `CommandId` never produces a reissue |
+| H-04 | An old command whose record has been evicted is treated as never delivered and reissued. Hypoglycemia. | Catastrophic | Finite record store wraps; absence of a record stops being evidence | `oldestRetainedCommandId` is returned with every outcome; absence resolves to `NEVER_SEEN` only inside the retention window, otherwise `EVICTED` and indeterminate. Automatic re-reconciliation does not clear that row. | `EvictedIsNotNeverSeenTest` asserts an out-of-window `CommandId` never produces a reissue; SC-24 keeps `Suspended` until acknowledgement |
 | H-05 | The app addresses a pump whose service layout has changed. A command is misinterpreted. | Critical | Android caches discovered services aggressively and can serve a stale layout after a firmware change | Protocol version in every PDU and in `STATUS`; version mismatch is rejected with `NAK(UNSUPPORTED_VERSION)`; `CacheStale` error class forces rediscovery on `ServiceChanged` | `VersionMismatchRejectedTest`; `StaleServiceCacheTest` in the scenario table |
 | H-06 | A corrupted dose value is actuated. | Catastrophic | Bit errors on the link, or tampering | CRC-16 over the whole PDU; session MAC over header and payload; independent pump-side range and limit validation that does not trust the requested value | `CorruptCrcTest`, `TamperedMacTest`, and pump limit tests |
 | H-07 | Insulin is delivered automatically after the user has disengaged. Hypoglycemia. | Serious | Automatic reissue of a `NEVER_SEEN` command long after the user confirmed | Reissue requires all of: under 60 s elapsed, screen in foreground, no intervening user action, first reissue for this `CommandId` | `ReissueGuardTest` covers each of the four conditions failing independently |
@@ -55,7 +55,9 @@ instead of guessing.
 | H-12 | The phone loses the `CommandId` for a command that may be in progress. Permanently unresolvable. | Critical | Process death after transmitting but before journaling | Journal is committed and flushed before transmission; a foreground service of type `connectedDevice` runs for the duration of an in-flight command (REQ-S-02) | `JournalPrecedesTransmitTest`; process-death instrumented case |
 | H-13 | The app permits a dose the pump would refuse, or refuses one the pump would permit. | Serious | Safety limits duplicated in two places and drifting apart | The pump is the sole enforcement point. App-side limits are advisory, exist only for early feedback, and never gate what the pump will accept | `AppLimitsAreAdvisoryTest` asserts the pump independently rejects an over-limit request that bypasses the app check |
 | H-14 | The user acts on pump state that changed while the app was absent. | Serious | The device can be serviced with no phone present ([00-overview.md](00-overview.md#a-requirement-worth-deriving-explicitly)) | `recordEpoch` in `STATUS` detects out-of-band change cheaply; reconciliation and history sync complete before `Ready` | `EpochChangeForcesHistorySyncTest` |
-| H-15 | A command outstanding across a record-store reset is treated as never delivered and reissued. Hypoglycemia. | Catastrophic | Factory reset, storage migration, or corruption recovery empties the store and restarts `oldestRetainedCommandId` low, so the retention-window test reports every outstanding command as in-window | `storeInstanceId` is recorded on the journal entry at send time and re-checked at query time; a mismatch yields `STORE_REPLACED` and is indeterminate, never a reissue | `StoreResetIsNotNeverSeenTest` asserts a command outstanding across a store reset never produces a reissue |
+| H-15 | A command outstanding across a record-store reset is treated as never delivered and reissued. Hypoglycemia. | Catastrophic | Factory reset, storage migration, or corruption recovery empties the store and restarts `oldestRetainedCommandId` low, so the retention-window test reports every outstanding command as in-window | `storeInstanceId` is recorded on the journal entry at send time and re-checked at query time; a mismatch yields `STORE_REPLACED` and is indeterminate, never a reissue. Automatic re-reconciliation does not clear that row. | `StoreResetIsNotNeverSeenTest` asserts a command outstanding across a store reset never produces a reissue; SC-24 keeps `Suspended` until acknowledgement |
+| H-16 | A late or duplicate response is attributed to a different command. A delivery that did not happen is journaled, or the real outcome is discarded. | Catastrophic | Controller matches inbound PDUs on opcode alone | A response binds to its request by `AckSeq` and, where non-zero, `CommandId`. Unmatched PDUs are discarded. The inbound sequence window drops duplicates in both directions. | `ResponseBindingTest`; `ReplayWithinSessionRejectedTest`; SC-11 asserts a duplicated `BOLUS_RSP` cannot answer the next command |
+| H-17 | Vitals from link establishment are presented as current. The operator doses against a reservoir or battery that has since changed. | Serious | `GET_STATUS` runs once after authentication and never again. Distinct from H-14, which is change *while the app was absent*. | A 5 s `GET_STATUS` poll while `Ready`; vitals go stale on the first failed poll; three consecutive failures are `Disconnected(TransientLink)` | `ResponseBindingTest` covers the request/response pairing the poll uses; the poll policy is specified in [03-connection-state-machine.md](03-connection-state-machine.md#ready-state-status-poll) |
 
 ## The three worth expanding
 
@@ -88,6 +90,16 @@ retention test does not merely fail to help, it actively returns the dangerous
 answer. Reporting where the boundary is only works if the controller can also
 tell that it is still looking at the same boundary, which is what
 `storeInstanceId` is for.
+
+Automatic re-reconciliation from `Suspended` re-queries commands that are
+still `Pending` or `InFlight`. It is explicitly barred from clearing an
+`Indeterminate` row. `EVICTED` and `STORE_REPLACED` mean the pump has
+destroyed the evidence; treating a later empty query as `NEVER_SEEN` would
+be H-04 or H-15 at catastrophic severity. Only a human acknowledgement
+journals `Acknowledged`. This falls out of the reconcile count: `BeginReconcile`
+queries `inFlight()` and recounts `hasIndeterminate()` afterward, so an
+`Indeterminate` entry keeps `unresolvedCount > 0` and the link stays
+`Suspended` until that acknowledgement.
 
 ### H-02 is the hazard that naive designs create while fixing H-01
 
@@ -135,6 +147,9 @@ not load-bearing.
 | H-12 | REQ-S-02 | — | `:data` journal; foreground service |
 | H-13 | — | — | `:simulator` limit validation |
 | H-14 | REQ-S-06 | I-5 | `:domain` reconciler; `:protocol` state machine |
+| H-15 | REQ-S-06 | I-3 | `:protocol` outcome codec; `:domain` reconciler |
+| H-16 | — | — | `:protocol` session layer |
+| H-17 | — | — | `:data` Ready-state poll; `:presentation` vitals projection |
 
 Every control in the right-hand column lands in `:protocol`, `:domain`, or
 `:simulator` — all three pure Kotlin. That is not a coincidence and it is the
