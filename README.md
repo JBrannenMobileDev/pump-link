@@ -14,7 +14,7 @@ command is never retried on an ambiguous response.
 
 [Watch the 90-second recovery](https://github.com/JBrannenMobileDev/pump-link/releases/tag/v1.0)
 — mid-command disconnect, then `QUERY_COMMAND_OUTCOME`. Never a second
-`CommandId`. Storyboard: [docs/10-demo-storyboard.md](docs/10-demo-storyboard.md).
+`CommandId`. 
 
 ## The diagram this repository exists for
 
