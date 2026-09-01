@@ -10,16 +10,17 @@ plugins {
 // refactor and noticed during review, if at all, so it is asserted here
 // instead. :domain having an empty edge set is the load-bearing entry.
 val allowedEdges: Map<String, Set<String>> = mapOf(
-    ":app" to setOf(":domain", ":data"),
+    ":app" to setOf(":domain", ":data", ":presentation"),
     ":data" to setOf(":domain", ":protocol", ":simulator"),
+    ":presentation" to setOf(":domain"),
     ":simulator" to setOf(":protocol"),
     ":protocol" to emptySet(),
     ":domain" to emptySet(),
 )
 
-// These three must stay runnable on a bare JVM, which is what lets most of the
-// scenario table run in CI with no device attached.
-val pureJvmModules = setOf(":protocol", ":domain", ":simulator")
+// These four must stay runnable on a bare JVM, which is what lets most of the
+// scenario table — and the MVI exhaustiveness rule — run in CI with no device.
+val pureJvmModules = setOf(":protocol", ":domain", ":presentation", ":simulator")
 
 val observedEdges = mutableMapOf<String, Set<String>>()
 val androidPluginUsage = mutableMapOf<String, Boolean>()

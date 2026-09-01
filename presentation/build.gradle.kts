@@ -3,16 +3,10 @@ import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 plugins {
     alias(libs.plugins.kotlin.jvm)
     alias(libs.plugins.detekt)
-    application
 }
 
-application {
-    mainClass.set("dev.pumplink.simulator.host.PumpHostKt")
-}
-
-// PumpCore is the pump's decision logic with no radio attached. It is the
-// other half of every scenario-table row, which is why it has to run on the
-// JVM alongside :protocol rather than only inside the Android simulator app.
+// MVI types and the connection-state projection. A JVM module so
+// ElseCaseInsteadOfExhaustiveWhen can actually run on the reducer. See ADR-02.
 kotlin {
     compilerOptions {
         jvmTarget = JvmTarget.JVM_17
@@ -26,7 +20,7 @@ java {
 }
 
 dependencies {
-    implementation(project(":protocol"))
+    implementation(project(":domain"))
     implementation(libs.kotlinx.coroutines.core)
 
     testImplementation(kotlin("test"))
@@ -45,9 +39,6 @@ detekt {
     config.setFrom(rootProject.file("config/detekt/detekt.yml"))
 }
 
-// The plain `detekt` task cannot see types, and ElseCaseInsteadOfExhaustiveWhen
-// needs to know whether the subject is sealed. Only detektMain enforces it, so
-// that is what `check` has to depend on.
 tasks.named("check") {
     dependsOn(tasks.named("detektMain"))
 }

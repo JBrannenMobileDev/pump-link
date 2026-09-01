@@ -24,7 +24,7 @@ jobs:
         run: ./gradlew checkModuleBoundaries
 
       - name: Pure JVM modules
-        run: ./gradlew :protocol:check :domain:check :simulator:check
+        run: ./gradlew :protocol:check :domain:check :presentation:check :simulator:check
 
       - uses: actions/upload-artifact@v4
         if: always()

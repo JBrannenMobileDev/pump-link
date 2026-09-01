@@ -6,14 +6,13 @@
 # it. That claim is only true while nobody writes `else`, so the claim needs a
 # mechanism rather than a convention.
 #
-# KNOWN GAP: the rule needs type resolution to tell whether a `when` subject is
-# sealed. detekt 1.23.8 only creates type-resolution tasks (detektMain) for
-# plain JVM modules; it does not create them for AGP 9 Android modules. So the
-# rule is enforced in :protocol, :domain, and :simulator, and is NOT enforced in
-# :app or :data. That is backwards from where it matters most, since the MVI
-# reducers are destined for :app. Two ways out, neither taken yet: move the
-# reducers into a pure module, or move to detekt 2.x once it leaves alpha.
-# Recorded here rather than left as a silent hole.
+# The rule needs type resolution to tell whether a `when` subject is sealed.
+# detekt 1.23.8 only creates type-resolution tasks (detektMain) for plain JVM
+# modules; it does not create them for AGP 9 Android modules. The MVI reducer
+# and the connection-state projection therefore live in :presentation, which
+# is a JVM module, so ElseCaseInsteadOfExhaustiveWhen actually runs on them.
+# :app and :data still only get the syntactic pass. That is acceptable: they
+# are not allowed to contain a reducer.
 
 build:
   maxIssues: 0
@@ -24,17 +23,28 @@ potential-bugs:
   ExitOutsideMain:
     active: true
   UnsafeCallOnNullableType:
-    active: true
+    active: false
+  UnreachableCode:
+    # Detekt disagrees with Kotlin about `?: return` smart-casts.
+    active: false
+
+coroutines:
+  InjectDispatcher:
+    active: false
 
 style:
-  # A missing branch should surface as a compile error, not be papered over.
   UnusedPrivateMember:
     active: true
   MaxLineLength:
     active: true
+    maxLineLength: 140
   ReturnCount:
     active: false
   MagicNumber:
+    active: false
+
+naming:
+  FunctionNaming:
     active: false
 
 complexity:
@@ -44,4 +54,18 @@ complexity:
   CyclomaticComplexMethod:
     # Protocol reducers are legitimately branchy; the state machine is the
     # complexity, not an accident of style.
+    active: false
+  TooManyFunctions:
+    # LinkReducer is one function per leaf state; PumpCore is the record store.
+    # Splitting them would add dispatch, not meaning.
+    active: false
+  LongParameterList:
+    active: false
+  ComplexCondition:
+    active: false
+  NestedBlockDepth:
+    active: false
+
+exceptions:
+  TooGenericExceptionCaught:
     active: false

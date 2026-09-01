@@ -4,9 +4,8 @@ plugins {
     alias(libs.plugins.detekt)
 }
 
-// One APK, two roles. Both phones install the same build and pick controller
-// or pump at launch, which keeps the parity story honest: the two sides are
-// exercised against each other rather than against a mock.
+// Controller only. The pump peripheral lives on the Mac; this APK never
+// hosts a GATT server and has no role picker.
 android {
     namespace = "dev.pumplink"
     compileSdk = libs.versions.compileSdk.get().toInt()
@@ -46,6 +45,7 @@ kotlin {
 dependencies {
     implementation(project(":domain"))
     implementation(project(":data"))
+    implementation(project(":presentation"))
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.activity.compose)
@@ -74,10 +74,9 @@ detekt {
     config.setFrom(rootProject.file("config/detekt/detekt.yml"))
 }
 
-// detekt 1.23.8 does not create type-resolution tasks for AGP 9 modules, so
-// only the syntactic pass runs here. ElseCaseInsteadOfExhaustiveWhen needs to
-// know whether a `when` subject is sealed and therefore does NOT fire in this
-// module. See config/detekt/detekt.yml for what that means for ADR-02.
+// Syntactic pass only. The MVI reducer lives in :presentation so the
+// exhaustiveness rule can run on it; this module is not allowed to contain
+// one. See config/detekt/detekt.yml.
 tasks.named("check") {
     dependsOn(tasks.named("detekt"))
 }

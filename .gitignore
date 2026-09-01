@@ -24,3 +24,9 @@ node_modules/
 
 # Fetched by tools/render-diagrams.sh; ~28 MB, not a source artifact.
 .tools/
+
+# SwiftPM
+.build/
+
+# Private hiring follow-up; not part of the public repo.
+docs/11-follow-up-email.md
