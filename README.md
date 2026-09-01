@@ -27,15 +27,11 @@ decides. The pump is the source of truth.
   <img alt="Sequence diagram: ambiguous outcome and recovery" src="docs/img/06-recovery-light.svg">
 </picture>
 
-The connection state machine makes that structural: `Ready` is unreachable
-until every locally journaled in-flight command has been reconciled.
+`Ready` is unreachable until every locally journaled in-flight command has
+been reconciled. The connection state machine lives in
+[docs/03-connection-state-machine.md](docs/03-connection-state-machine.md).
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/img/03-connection-state-dark.svg">
-  <img alt="Connection state machine" src="docs/img/03-connection-state-light.svg">
-</picture>
-
-Both pictures are generated from [diagrams/](diagrams/). CI re-renders every
+The picture is generated from [diagrams/](diagrams/). CI re-renders every
 `.puml` and fails on a stale SVG, so the images in the docs cannot drift from
 the sources that produce them.
 
