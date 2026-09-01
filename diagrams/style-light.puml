@@ -2,9 +2,9 @@
 ' Every diagram includes "style.puml"; the render script decides which one that is.
 
 skinparam backgroundColor        #FFFFFF
-skinparam defaultFontName        "Helvetica Neue"
+skinparam defaultFontName        "Liberation Sans"
 skinparam defaultFontSize        13
-skinparam defaultMonospacedFontName "Menlo"
+skinparam defaultMonospacedFontName "Liberation Mono"
 skinparam shadowing              false
 skinparam roundCorner            6
 skinparam ArrowColor             #44546A

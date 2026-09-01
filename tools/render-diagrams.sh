@@ -15,6 +15,8 @@
 #
 # Layout uses Smetana (PlantUML's Java Graphviz port) so CI on Ubuntu and a
 # local Homebrew Graphviz 15.x do not produce different coordinates.
+# Fonts are the Liberation files in tools/fonts, for the same reason: SVG
+# textLength is a font-metric, and Helvetica Neue is not on Ubuntu.
 #
 set -euo pipefail
 
@@ -50,6 +52,19 @@ if [[ $CHECK -eq 1 ]]; then
 fi
 mkdir -p "$dest"
 
+# Bundled Liberation fonts so SVG textLength is the same on macOS and Ubuntu.
+FONTDIR="$ROOT/tools/fonts"
+FONTCONF="$TOOLS/fonts.conf"
+cat > "$FONTCONF" <<EOF
+<?xml version="1.0"?>
+<!DOCTYPE fontconfig SYSTEM "fonts.dtd">
+<fontconfig>
+  <dir>${FONTDIR}</dir>
+  <cachedir>${TOOLS}/fontconfig-cache</cachedir>
+</fontconfig>
+EOF
+export FONTCONFIG_FILE="$FONTCONF"
+
 for theme in light dark; do
   stage="$TOOLS/stage-$theme"
   rm -rf "$stage"; mkdir -p "$stage"
@@ -62,7 +77,8 @@ for theme in light dark; do
 
   # -nometadata keeps output byte-stable so --check diffs mean something.
   # -Playout=smetana keeps layout off the host Graphviz binary.
-  java -jar "$JAR" -tsvg -nometadata -failfast2 -Playout=smetana \
+  java -Dsun.java2d.fontpath="$FONTDIR" \
+    -jar "$JAR" -tsvg -nometadata -failfast2 -Playout=smetana \
     -o "$stage/out" "$stage/*.puml" >/dev/null
 
   for svg in "$stage"/out/*.svg; do

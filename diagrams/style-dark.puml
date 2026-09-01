@@ -2,9 +2,9 @@
 ' Variable names match style-light.puml so diagram sources are style-agnostic.
 
 skinparam backgroundColor        #0D1117
-skinparam defaultFontName        "Helvetica Neue"
+skinparam defaultFontName        "Liberation Sans"
 skinparam defaultFontSize        13
-skinparam defaultMonospacedFontName "Menlo"
+skinparam defaultMonospacedFontName "Liberation Mono"
 skinparam defaultFontColor       #C9D1D9
 skinparam shadowing              false
 skinparam roundCorner            6
